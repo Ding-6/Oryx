@@ -54,14 +54,53 @@
 这样配色完全跟着 Oryx 的 token 走 —— 用 npm 版组件库的话，
 配色就成了它的品牌色，改不动。
 
+### 4. 客户端自动剥壳 —— 前端拿到的就是领域对象
+
+后端 v2 的成功响应是 `{code, data, message}`。
+如果每个调用点都要写 `.data`，那就等于把后端的壳泄漏到每一处。
+
+所以 `api.ts` 在 `request()` 里统一剥掉：
+
+```ts
+const sessions = await api.get<Session[]>('/api/sessions')   // 直接就是 Session[]
+```
+
+**怎么认出「这是个 v2 响应」**：不能只看有没有 `data` 键 ——
+老接口里也有返回体正好带 `data` 字段的，那样会被误剥一层。
+所以要求三个特征同时成立：`code` 是数字、`message` 是字符串、`data` 键存在。
+还没改造的旧接口返回裸对象，原样透传 —— 迁移期两种都能吃。
+
+### 5. tokens.css 里的**老前端布局**要覆盖掉
+
+`tokens.css` 名字叫「tokens」，其实不是纯变量文件 ——
+它还带着老前端的全局布局（`body { display:flex }`、`#app`、`#bgLayer`、滚动条…）。
+
+新前端 import 它是为了复用那套**设计变量**，但那套布局规则跟新前端冲突：
+
+> `body` 是 flex 容器 → `#root` 变成 flex item，宽度按内容收缩。
+> 实测 1600px 的视口里 `#root` 只有 **752px**，右边空一大片。
+
+所以 `index.css` 里有一段 `body { display: block }` 覆盖。
+
+**这段覆盖必须写在任何 layer 之外** —— CSS 级联里
+「无 layer 的规则」优先级**高于**「有 layer 的规则」，
+放进 `@layer base` 会被 tokens.css 直接压过去 —— 写了等于没写。
+
 ## 现在到哪一步了
 
-- ✅ 骨架：顶栏 + 左栏 + 主区 + 右栏，与老前端的信息架构对齐
-- ✅ `api.ts` 统一客户端
+- ✅ 骨架：顶栏 + 左栏 + 主区 +右栏，与老前端的信息架构对齐
+- ✅ `api.ts` 统一客户端（自动剥 v2 响应壳）
 - ✅ `button.tsx` 组件（default/outline/ghost/danger × sm/md/lg/icon）
 - ✅ Tailwind v4 接上现有 token（明暗两套）
-- ⬜ 按域迁移 22 个后端域的页面
-- ⬜ 大屏（多 Agent 一屏总览）接口化后做页面
+- ✅ **session 域接入**（v2 样板域的第一条完整链路）
+      · `lib/types.ts` —— 类型从后端代码反推
+      · `features/sessions/api.ts` —— 类型化调用
+      · `features/sessions/SessionList.tsx` —— 左栏列表（按时间分组 + 搜索）
+      · `features/sessions/SessionDetail.tsx` —— 消息 / 待办 / 步骤 / 用量
+- ✅ **大屏三接口接入**（`/api/overview/{teams,runs,suggestions}`）
+      · `features/overview/api.ts` + `features/overview/OverviewPanel.tsx`
+- ⬜ 按域迁移其余 21 个后端域的页面
+- ⬜ 老前端整页下线（替换完再撤）
 
 ## 命令
 

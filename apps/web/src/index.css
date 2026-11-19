@@ -80,6 +80,32 @@
   --font-mono: 'JetBrains Mono', Consolas, 'SF Mono', monospace;
 }
 
+/* ── 覆盖 tokens.css 带来的**老前端布局** ───────────────────────────
+ *
+ * tokens.css 名字叫「tokens」，其实不是纯变量文件 ——
+ * 它还带着老前端的全局布局：
+ *
+ *     body { display:flex; overflow:hidden }
+ *     #app { position:relative; display:flex; width:100%; height:100% }
+ *     #bgLayer { position:fixed; inset:0; ... }
+ *
+ * 新前端 import 它是为了复用那套**设计变量**（配色/圆角/字体），
+ * 但那套布局规则跟新前端冲突：
+ *
+ *     body 是 flex 容器 → #root 变成 flex item，
+ *     宽度按内容收缩 —— 实测 1600px 的视口里 #root 只有 752px，
+ *     右边空一大片。
+ *
+ * **为什么必须写在任何 layer 之外**
+ * --------------------------------
+ * CSS 级联里「无 layer 的规则」优先级**高于**「有 layer 的规则」。
+ * tokens.css 是无 layer 的，所以这段覆盖要是放进 @layer base，
+ * 会被 tokens.css 直接压过去 —— 写了等于没写。
+ */
+body {
+  display: block;
+}
+
 /* ── 基础层 ──────────────────────────────────────────────────────────
    Tailwind 的 preflight 会把 h1~h6 的字号重置掉，
    现有前端是按自己的比例来的 —— 这里补回来，别让新页面字号全变样。 */

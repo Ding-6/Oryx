@@ -63,6 +63,34 @@ export function pickMessage(body: ApiErrorBody | undefined, status: number): str
   return `请求失败（${status}）`
 }
 
+/**
+ * v2 统一响应 → 领域数据。
+ *
+ * 后端 v2 的成功响应是 `{code, data, message}`，
+ * 调用方要的是 `data` 里的领域对象 —— 不该让每个调用点都写 `.data`。
+ *
+ * **怎么认出「这是个 v2 响应」**
+ * ----------------------------
+ * 只看有没有 `data` 键是不够的 —— 老接口里也有返回体正好带 `data` 字段的，
+ * 那样会被误剥一层。所以要求**三个特征同时成立**：
+ * `code` 是数字、`message` 是字符串、`data` 键存在。
+ *
+ * 还没改造的旧接口返回裸对象，原样透传 —— 迁移期两种都能吃。
+ */
+export function unwrap<T>(body: unknown): T {
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const maybe = body as { code?: unknown; message?: unknown; data?: unknown }
+    if (
+      typeof maybe.code === 'number' &&
+      typeof maybe.message === 'string' &&
+      'data' in maybe
+    ) {
+      return maybe.data as T
+    }
+  }
+  return body as T
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
   body?: unknown
@@ -118,7 +146,8 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     throw new ApiError(res.status, pickMessage(body, res.status), body)
   }
 
-  return parsed as T
+  // v2 统一响应 → 领域数据（老接口的裸对象原样透传）。
+  return unwrap<T>(parsed)
 }
 
 export const api = {
