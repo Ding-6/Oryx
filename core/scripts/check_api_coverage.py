@@ -40,6 +40,10 @@ from pathlib import Path
 CORE = Path(__file__).resolve().parents[1]
 WEB = CORE / "web"
 ORYX = CORE / "oryx"
+# 新前端（apps/web）。**两套前端都要扫** ——
+# 新前端正在逐域替换老前端，老的那套还在跑；
+# 只扫一套的话，另一套的调用就没人守了。
+NEW_WEB = CORE.parent / "apps" / "web" / "src"
 
 # ── 后端 ────────────────────────────────────────────────────────────────
 
@@ -188,7 +192,33 @@ def _routes_from_source() -> dict[str, dict[str, str]]:
 # ── 前端 ────────────────────────────────────────────────────────────────
 
 API_CALL_RE = re.compile(r"""api\s*\(\s*[`'"](/[^`'"]*)[`'"]""")
+
+# 新前端的客户端调用（apps/web/src/lib/api.ts）：
+#     api.get<Session[]>('/api/sessions')
+#     api.post('/api/chat', body) / api.put(...) / api.del(...)
+#
+# 与老前端的 `api('/api/x')` 区别：
+#   · 前面多一个方法名（方法**写明**了，不用从上下文猜）
+#   · 可能带泛型参数：api.get<Session[]>('/api/sessions')
+#
+# 泛型里可能有嵌套尖括号（`api.get<Array<{a: string}>>`），
+# 所以泛型部分写成「一层或两层尖括号」，里面不含 `>`。
+CLIENT_CALL_RE = re.compile(
+    r"api\s*\.\s*(get|post|put|del|delete|patch)\s*"
+    r"(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(\s*[`'\"](/[^`'\"]*)[`'\"]"
+)
 FETCH_RE = re.compile(r"""fetch\s*\(\s*[`'"](/[^`'"]*)[`'"]""")
+
+# 新前端客户端的方法名 → HTTP 方法。
+# 注意 `del` 是新前端的写法（对齐 api.del），要映射成 **DELETE**。
+_CLIENT_METHODS = {
+    "get": "GET",
+    "post": "POST",
+    "put": "PUT",
+    "del": "DELETE",
+    "delete": "DELETE",
+    "patch": "PATCH",
+}
 # SSE —— EventSource 不走 api()/fetch()
 EVENTSOURCE_RE = re.compile(r"""new\s+EventSource\s*\(\s*[`'"](/[^`'"]*)[`'"]""")
 # 变量持有路径：const url = '/api/xxx'  /  const url = cond ? '/a' : '/b'
@@ -216,8 +246,21 @@ def _normalize(path: str) -> str:
 
     模板字符串里的 `${...}` 与后端的 `{param}` 对齐；
     查询串去掉（后端路由不区分 query）。
+
+    **查询串变量要丢掉，路径参数要留着** ——
+    这两种 `${...}` 长得一样，靠**前面有没有 `/`** 区分：
+
+        `/api/sessions/${id}`       → `/api/sessions/{}`   （路径参数）
+        `/api/overview/x${q}`       → `/api/overview/x`    （查询串变量）
+
+    以前一律替换成 `{}`，第二种会变成 `/api/overview/x/{}` ——
+    跟后端的 `/api/overview/x` 对不上，于是这个接口被误报成
+    「后端有、前端没用」。
     """
     path = path.split("?", 1)[0].split("#", 1)[0]
+    # 前面不是 `/` 的模板部分 = 查询串变量 → 整段丢掉
+    path = re.sub(r"(?<!/)\$\{[^}]*\}", "", path)
+    # 剩下的才是路径参数
     path = TEMPLATE_PART_RE.sub("{}", path)
     path = re.sub(r"\{[^}]*\}", "{}", path)
     if len(path) > 1 and path.endswith("/"):
@@ -253,6 +296,10 @@ def _api_references(text: str) -> list[tuple[str, str, int]]:
     for rx in (API_CALL_RE, FETCH_RE):
         for m in rx.finditer(text):
             refs.append((_method_of(text, m.end()), m.group(1), m.start()))
+
+    # 1b) 新前端的客户端调用：api.get<T>('/api/x') —— 方法写明了，不用猜
+    for m in CLIENT_CALL_RE.finditer(text):
+        refs.append((_CLIENT_METHODS[m.group(1).lower()], m.group(2), m.start()))
     # 2) SSE
     for m in EVENTSOURCE_RE.finditer(text):
         refs.append(("GET", m.group(1), m.start()))
@@ -321,10 +368,21 @@ def frontend_used_paths() -> set[str]:
 
 
 def _frontend_files() -> list[Path]:
-    return sorted(
-        list((WEB / "modules").glob("*.js"))
-        + list((WEB / "ui-extensions").glob("**/*.js"))
-    )
+    """两套前端的源文件。
+
+    老前端：core/web/modules/*.js（+ 用户目录里的界面扩展）
+    新前端：apps/web/src/**/*.{ts,tsx}
+
+    **两套都要扫** —— 新前端正在逐域替换老前端，老的那套还在跑。
+    只扫一套的话，另一套的调用就没人守了：
+    新前端调了后端没有的接口，跑起来才发现 404。
+    """
+    files = list((WEB / "modules").glob("*.js"))
+    files += list((WEB / "ui-extensions").glob("**/*.js"))
+    if NEW_WEB.is_dir():
+        for pattern in ("**/*.ts", "**/*.tsx"):
+            files += list(NEW_WEB.glob(pattern))
+    return sorted(files)
 
 
 # ── 比对 ────────────────────────────────────────────────────────────────
