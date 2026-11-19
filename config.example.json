@@ -1,0 +1,38 @@
+{
+  "active_provider": "anthropic",
+  "local_provider": "ollama",
+  "providers": {
+    "anthropic": {
+      "type": "anthropic",
+      "base_url": "https://api.anthropic.com",
+      "api_key": "在这里填你的 key",
+      "model": "claude-sonnet-5-5"
+    },
+    "deepseek": {
+      "type": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "在这里填你的 key",
+      "model": "deepseek-chat"
+    },
+    "ollama": {
+      "type": "openai",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "api_key": "ollama",
+      "model": "qwen3:8b"
+    }
+  },
+  "allowed_roots": ["D:\\"],
+  "forbidden_paths": ["C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)"],
+  "max_turns": 12,
+  "ocr": true,
+  "embeddings": true,
+  "browser_headless": true,
+  "interaction": "craft",
+  "style": "professional",
+  "expert": "",
+  "mcp_servers": {},
+  "remote_relay": "wss://你的中转域名",
+  "remote_fps": 8,
+  "host": "127.0.0.1",
+  "port": 8765
+}

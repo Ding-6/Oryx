@@ -1,0 +1,606 @@
+/* 面板：团队名册、工作流阶段、统一卡片、产物
+   —— 从 `main.css` 按原顺序切出。层叠顺序与拆分前完全一致。 */
+
+  /* ── 团队名册 ─────────────────────────────────────────── */
+  .team {
+    border:1px solid var(--line);
+    background:var(--card);
+    border-radius:var(--r-lg);
+    padding:14px 16px;
+    margin-bottom:10px;
+    box-shadow:var(--shadow);
+    animation: rise var(--dur-slow) var(--ease) both;
+  }
+  .team .th { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+  .team .tn { font-weight:650; font-size:15px; color:var(--ink); letter-spacing:-.2px; }
+  .team .tc {
+    margin-left:auto;
+    font-family:var(--font-mono);
+    font-size:10px;
+    color:var(--muted);
+    letter-spacing:.6px;
+    text-transform:uppercase;
+  }
+  .team .tg {
+    font-size:12px;
+    color:var(--muted);
+    line-height:1.6;
+    margin-bottom:10px;
+    padding-bottom:10px;
+    border-bottom:1px solid var(--line);
+  }
+  .member {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:6px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .member:last-of-type { border-bottom:0; }
+  .member .mk {
+    width:22px; height:22px;
+    flex:0 0 22px;
+    border-radius:50%;
+    background:var(--accent-soft);
+    display:grid; place-items:center;
+    font-size:10px; font-weight:700;
+    color:var(--accent);
+  }
+  .member .mn { font-family:var(--font-mono); font-size:12px; color:var(--ink); font-weight:500; }
+  .member .mr { font-size:11px; color:var(--muted); margin-left:2px; }
+  .member .mu {
+    margin-left:auto;
+    font-family:var(--font-mono);
+    font-size:10px;
+    color:var(--accent);
+    letter-spacing:.4px;
+    text-transform:uppercase;
+  }
+  .member .mx {
+    font-size:11px;
+    color:var(--danger);
+    margin-left:6px;
+    opacity:0;
+    cursor:pointer;
+    transition:opacity .15s;
+  }
+  .member:hover .mx { opacity:1; }
+  /* ══ 工作流：阶段分组 + step 行 ══
+     刻意复用 .badge / .member 的视觉语言，不新增 CSS 变量，深色主题自动跟随 */
+  .wfstage { margin-top:14px; }
+  .wfstage:first-of-type { margin-top:0; }
+  .wfstage > .sh {
+    display:flex; align-items:center; gap:8px;
+    font-size:10.5px; font-weight:600;
+    color:var(--muted);
+    text-transform:uppercase; letter-spacing:.8px;
+    padding:6px 2px;
+    border-bottom:1px solid var(--line);
+    margin-bottom:2px;
+  }
+  .wfstage > .sh .n {
+    font-family:var(--font-mono);
+    color:var(--ink-2);
+    letter-spacing:0;
+    text-transform:none;
+    margin-left:auto;
+  }
+  /* step 行：左状态点 + 主文本 + 右侧耗时。点头行展开产出 */
+  .wfstep {
+    display:flex; align-items:flex-start; gap:10px;
+    padding:8px 8px;
+    border-radius:var(--r);
+    border:1px solid transparent;
+    cursor:pointer;
+    transition:background .15s;
+  }
+  .wfstep:hover { background:var(--bg-2); }
+  .wfstep .dt {
+    flex:0 0 7px; width:7px; height:7px;
+    border-radius:50%;
+    margin-top:6px;
+    background:var(--line-strong);
+  }
+  /* 类名跟 step 的 status 取值一致（running/done/failed/skipped），
+   不是徽标那套 L0/run/done —— 两套命名混用会让选择器永远匹配不上 */
+.wfstep.running .dt { background:var(--accent); animation:pulse var(--dur-loop) ease-in-out infinite; }
+  .wfstep.done .dt { background:var(--ok); }
+  .wfstep.failed .dt { background:var(--danger); }
+  .wfstep.skipped .dt { background:var(--line-strong); }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+  .wfstep .bd { min-width:0; flex:1; }
+  .wfstep .nm {
+    font-size:12.5px; color:var(--ink);
+    display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+  }
+  .wfstep .ag { font-family:var(--font-mono); font-size:10.5px; color:var(--muted); }
+  .wfstep .ms { font-family:var(--font-mono); font-size:10.5px; color:var(--muted); margin-left:auto; white-space:nowrap; }
+  .wfstep .sm {
+    font-size:11.5px; color:var(--ink-2); line-height:1.65;
+    margin-top:6px;
+    padding:9px 11px;
+    /* 展开区要有个底：子 Agent 的产出是长文本，直接摊在卡片上
+       会和标题糊在一起，分不清哪一段才是产出 */
+    background:var(--bg-2);
+    border:1px solid var(--line);
+    border-radius:var(--r);
+    white-space:pre-wrap; word-break:break-word;
+    /* 收起时把 padding 与边框也一起归零，否则收起的行仍有一条横线 */
+    max-height:0; overflow:hidden;
+    padding-top:0; padding-bottom:0; border-width:0;
+    transition:max-height .18s ease, padding .18s ease;
+  }
+  .wfstep.open { border-color:var(--line); background:var(--bg-2); }
+  .wfstep.open .sm { max-height:420px; overflow:auto; padding-top:9px; padding-bottom:9px; border-width:1px; }
+  .wfstep .er { font-size:11.5px; color:var(--danger); line-height:1.65; margin-top:6px; padding:8px 10px; background:var(--danger-soft); border-radius:var(--r); word-break:break-word; }
+  /* 运行中卡片顶部的进度条：阶段推进时可见 */
+  .wfbar {
+    height:3px; border-radius:999px;
+    background:var(--line);
+    overflow:hidden; margin-top:10px;
+  }
+  .wfbar > i {
+    display:block; height:100%;
+    background:var(--accent);
+    border-radius:999px;
+    transition:width .3s ease;
+  }
+  .team .thread { margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
+  .team .msgline {
+    font-size:12px;
+    color:var(--ink-2);
+    line-height:1.6;
+    padding:4px 0;
+    display:flex;
+    gap:8px;
+  }
+  .team .msgline .who {
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    color:var(--accent);
+    flex:0 0 auto;
+    text-transform:uppercase;
+    letter-spacing:.4px;
+  }
+  .team .msgline .what { min-width:0; word-break:break-word; }
+  .team .act { display:flex; gap:8px; margin-top:10px; }
+  .team .act .btn { font-size:11px; padding:4px 10px; }
+
+  /* ══════════ 全屏页 ══════════ */
+  /* #page 是 #app 里与 rail / side 平级的第三栏：用 flex 兄弟定位占住中间，
+     不能 absolute + inset:0 —— 那会盖住整个窗口，把左栏的点击全吃掉。 */
+  #page { flex:1 1 auto; min-width:0; background:var(--bg); display:none; overflow-y:auto; position:relative; z-index:1; }
+  #page.on { display:block; }
+  .phead {
+    position:sticky; top:0;
+    background:color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+    padding:16px 28px;
+    display:flex; align-items:center; gap:14px;
+    z-index:2;
+  }
+  .phead h1 { font-size:var(--fs-xl); margin:0; font-weight:650; letter-spacing:-.3px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .phead .sub { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pbody { max-width:1180px; margin:0 auto; padding:28px clamp(16px, 3vw, 32px) 80px; }
+  .sect { margin-bottom:var(--sp-5); }
+  /* 分区标题：全大写 + 字距 + 下划线，是「这里是一个区块」的信号。
+     字号比正文大一号 —— 以前用 11.5px（比正文还小），
+     扫一眼分不清哪里是分区、哪里是内容。 */
+  .sect > h2 {
+    font-size:var(--fs-sm);
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.8px;
+    color:var(--muted);
+    margin:0 0 var(--sp-3);
+    padding-bottom:var(--sp-2);
+    border-bottom:1px solid var(--line);
+    display:flex;
+    align-items:baseline;
+    gap:var(--sp-2);
+  }
+  /* h2 是 flex 容器：塞进去的按钮不能跟着标题一起大写 */
+  .sect > h2 .btn { text-transform:none; letter-spacing:0; font-size:var(--fs-sm); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:var(--sp-3); }
+  .tile {
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--r-lg);
+    padding:var(--sp-4) var(--sp-4);
+    transition:border-color var(--dur-fast) ease, transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
+    position:relative;
+  }
+  .tile:hover { border-color:var(--accent-line); transform:translateY(-1px); box-shadow:var(--shadow-md); }
+  .tile h3 {
+    margin:0 0 var(--sp-1);
+    font-size:var(--fs-lg);
+    font-weight:650;
+    letter-spacing:-.2px;
+    display:flex; align-items:center; gap:var(--sp-2);
+  }
+  .tile p { margin:0; font-size:var(--fs-md); color:var(--ink-2); line-height:1.7; }
+  .tile .foot { margin-top:var(--sp-3); display:flex; gap:var(--sp-1); flex-wrap:wrap; align-items:center; }
+
+  /* 工具集卡片：一套工具 = 一张卡，工具名列成小徽章。
+     之前是一个工具一张卡（60 多张），用户根本不知道该点哪个。 */
+  .setchip {
+    font-size:11.5px; line-height:1.5;
+    padding:2px 8px;
+    border-radius:var(--r-pill, 99px);
+    background:var(--accent-soft);
+    color:var(--accent);
+    white-space:nowrap;
+  }
+  .card {
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--r-lg);
+    padding:20px 22px;
+    box-shadow:var(--shadow);
+    position:relative;
+  }
+
+  /* ══════════ 统一卡片 ══════════
+     技能、人设、工具集、自动任务、能力 —— 全用这一套。
+     之前每个页面各写各的：卡片高度不齐、按钮位置飘、
+     描述长的把卡片撑得老高、矮的卡又显得空荡荡。
+     统一后：
+       · 卡片高度固定（--uc-h），描述超出就省略号
+       · 标题、描述、按钮各占一行，行高一致
+       · 按钮永远贴在卡片底部同一水平线
+       · 描述太长时点标题弹详情，弹窗里能看全文 + 编辑 + 删除
+     高度靠 CSS 变量定，grid 的行由每张卡自己的 min-height 保证一致。 */
+  .uc {
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--r-lg);
+    padding:14px 16px;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    /* 同尺寸的关键：**每一行都固定高度**，缺的那行也占位。
+       之前 id / 徽章 / 标签都是「有才渲染」，结果有的卡多一行、有的少一行，
+       高度差了 20px，描述和按钮的位置也跟着飘。
+       现在统一成：标题行 / 元信息行 / 描述两行 / 标签行 / 按钮行，五行恒定。
+
+       高度要装得下内容：
+         24(标题) + 16(元信息) + 42(描述两行) + 19(标签) + 26(按钮) = 127
+         + 4 个 gap × 8 = 32
+         + 上下 padding 14 × 2 = 28
+         = 187px
+       之前写 172px，少了 15px —— 按钮那行顶出卡片下边框（用户说的「溢出了」）。
+       overflow:hidden 兜底，万一以后加行也不会再顶出去。 */
+    height:187px;
+    overflow:hidden;
+    transition:border-color .18s, box-shadow .18s;
+  }
+  .uc:hover { border-color:var(--accent-line); box-shadow:var(--shadow-md); }
+  /* 标题行：图标 + 名字 + 计数徽章，高度固定 */
+  .uc .uh {
+    display:flex; align-items:center; gap:8px;
+    height:24px; flex:0 0 24px;
+  }
+  .uc .uh .uicon {
+    width:24px; height:24px; flex:0 0 24px; border-radius:7px;
+    display:grid; place-items:center; font-size:12px;
+    background:var(--accent-soft); color:var(--accent); font-weight:700;
+  }
+  .uc .uh .uname {
+    font-size:13.5px; font-weight:650; letter-spacing:-.2px;
+    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .uc .uh .ucnt {
+    margin-left:auto; flex:0 0 auto;
+    font-size:10.5px; color:var(--muted);
+    background:var(--panel-2); border-radius:999px; padding:1px 8px;
+  }
+  /* 元信息行：左边副标识（目录名 / 工具 id / cron），右边徽章。永远占一行 */
+  .uc .umeta {
+    display:flex; align-items:center; gap:6px;
+    height:16px; flex:0 0 16px; min-width:0;
+  }
+  .uc .uid {
+    font:10.5px/1.4 var(--font-mono); color:var(--muted);
+    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .uc .ubadges { display:flex; gap:5px; align-items:center; margin-left:auto; flex:0 0 auto; }
+  .uc .ubadges:empty { display:none; }
+  /* 描述：固定两行，超出省略。点标题看全文 */
+  .uc .udesc {
+    font-size:12.5px; color:var(--ink-2); line-height:1.65;
+    height:42px; flex:0 0 42px;
+    overflow:hidden; cursor:pointer;
+  }
+  .uc .udesc:hover { color:var(--ink); }
+  /* 标签区：固定一行，超出横向裁掉 */
+  .uc .uchips {
+    display:flex; gap:4px; flex-wrap:nowrap; overflow:hidden;
+    flex:0 0 19px; height:19px;
+  }
+  .uc .uchips .setchip { font-size:10.5px; padding:1px 7px; }
+  /* 操作区：永远在卡片底部同一水平线 */
+  .uc .ufoot {
+    display:flex; gap:6px; align-items:center;
+    flex:0 0 26px; margin-top:auto; min-height:26px;
+  }
+  .uc .ufoot .btn { font-size:11.5px; padding:4px 11px; line-height:1.5; }
+  .uc .ufoot .spacer { flex:1; }
+  /* 主操作按钮固定在最右 —— 所有卡片的主按钮在同一个位置 */
+  .uc .ufoot .btn.primary { margin-left:auto; }
+  /* 网格：卡片列宽固定，视觉更整齐 */
+  .grid.ucgrid { grid-template-columns:repeat(auto-fill,minmax(248px,1fr)); }
+  /* 详情弹窗里的元信息表 */
+  .ucdetail { display:flex; flex-direction:column; gap:14px; }
+  .ucdetail .urow { display:flex; gap:10px; font-size:13px; line-height:1.75; }
+  .ucdetail .urow .ul {
+    flex:0 0 72px; color:var(--muted); font-size:12px; padding-top:2px;
+  }
+  .ucdetail .urow .uv { flex:1; min-width:0; word-break:break-word; }
+  .ucdetail .urow .uv pre {
+    margin:0; padding:10px 12px; background:var(--bg-2);
+    border:1px solid var(--line); border-radius:var(--r);
+    font:12px/1.7 var(--font-mono); white-space:pre-wrap; word-break:break-word;
+    max-height:44vh; overflow:auto;
+  }
+  /* 确认弹窗 */
+  .confirm { display:flex; gap:12px; align-items:flex-start; }
+  .confirm .cico {
+    width:34px; height:34px; flex:0 0 34px; border-radius:50%;
+    display:grid; place-items:center; font-size:16px;
+    background:var(--danger-soft, #fdecec); color:var(--danger);
+  }
+  .confirm .ctxt { font-size:13.5px; line-height:1.75; color:var(--ink-2); }
+  .confirm .ctxt b { color:var(--ink); }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .inp {
+    background:var(--bg-2);
+    border:1px solid var(--line);
+    border-radius:var(--r);
+    padding:7px 12px;
+    outline:none;
+    font-size:13.5px;
+    color:var(--ink);
+  }
+  .inp:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  table.mx { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.mx th,table.mx td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); }
+  table.mx th {
+    color:var(--muted);
+    font-weight:600;
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:.8px;
+  }
+  table.mx td { color:var(--ink-2); }
+  /* 工作流表的列宽分配。不设的话窄窗口下「进度」表头被压成竖排、
+     「4 分钟前」折成三行把行高从 20px 撑到 61px，双徽标也会上下堆叠。
+     宽度值都要算上左右各 8px 内边距 —— 列宽是 border-box 的内容+内边距，
+     少算内边距会让按钮从单元格里溢出去（820px 下实测溢出 18px）。
+     min-width 固定列合计 452px，名称列最低留 118px 内宽（能放下 9 个中文标题）= 570px。 */
+  table.wftbl { table-layout:fixed; min-width:570px; }
+  table.wftbl th:nth-child(1),table.wftbl td:nth-child(1) { width:auto; }
+  table.wftbl th:nth-child(2),table.wftbl td:nth-child(2) { width:118px; }
+  table.wftbl th:nth-child(3),table.wftbl td:nth-child(3) { width:52px; }
+  table.wftbl th:nth-child(4),table.wftbl td:nth-child(4) { width:72px; }
+  table.wftbl th:nth-child(5),table.wftbl td:nth-child(5) { width:88px; }
+  table.wftbl th:nth-child(6),table.wftbl td:nth-child(6) { width:122px; }
+  /* 表头不换行；状态列的徽标固定横排 —— 双徽标堆叠后与其他行的单徽标对不齐 */
+  table.wftbl th { white-space:nowrap; }
+  table.wftbl .wfbd { display:flex; flex-wrap:nowrap; align-items:center; gap:5px; }
+  table.wftbl .wfbd .badge { margin-left:0 !important; flex:0 0 auto; }
+  table.wftbl td:nth-child(5) { white-space:nowrap; }
+  /* 名称与副标题都单行省略：折行会把行高从 60px 顶到 79px，
+     30 行里大半行高不齐，比截断难看得多 */
+  table.wftbl .wfnn,table.wftbl .wfng {
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  table.wftbl .wfng { font-size:11px; color:var(--muted); margin-top:2px; }
+  /* 放不下就横向滚，不硬挤：挤到 820px 时名称列只剩 90px，主标题全折行 */
+  .wfscroll { overflow-x:auto; }
+  .y { color:var(--ok); font-weight:600; } .n { color:var(--muted); }
+  .kbd {
+    font-family:var(--font-mono);
+    font-size:11px;
+    background:var(--bg);
+    border:1px solid var(--line-strong);
+    border-bottom-width:2px;
+    border-radius:6px;
+    color:var(--ink-2);
+    padding:1px 7px;
+  }
+
+  /* 首页工作台
+     ────────────────────────────────────────────────────────
+     这里的留白以前是「56px 上边距 + 40px 标题 + 两段 margin」，
+     合计吃掉近 200px 高度 —— 用户进来先看到一大片空白，
+     真正要用的能力清单要往下滚才看得到。
+
+     收紧到 ~120px：**标题还是那个标题**（入口页需要欢迎感），
+     但不再让人以为页面没加载完。 */
+  .hero { text-align:center; padding:26px 20px 24px; position:relative; }
+  .hero h1 {
+    font-size:32px;
+    font-weight:700;
+    letter-spacing:-1px;
+    margin:0 0 8px;
+    line-height:1.15;
+  }
+  .hero h1 em { font-style:normal; color:var(--accent); }
+  .hero p {
+    font-size:14px;
+    color:var(--muted);
+    margin:0 auto 20px;
+    max-width:520px;
+  }
+  .scenes {
+    display:inline-flex;
+    border:1px solid var(--line);
+    border-radius:999px;
+    background:var(--bg-2);
+    padding:3px;
+    gap:2px;
+    margin-bottom:24px;
+  }
+  .scene {
+    display:flex; align-items:center; gap:7px;
+    padding:7px 20px;
+    border-radius:999px;
+    border:0;
+    background:transparent;
+    cursor:pointer;
+    font-size:13px;
+    font-weight:500;
+    color:var(--ink-2);
+    transition:background .15s, color .15s;
+  }
+  .scene.on { background:var(--accent); color:var(--on-accent); font-weight:600; box-shadow:var(--shadow); }
+  .caps {
+    display:flex;
+    gap:8px;
+    overflow-x:auto;
+    padding:4px 0 14px;
+    justify-content:center;
+    flex-wrap:wrap;
+  }
+  .cap {
+    display:flex; align-items:center; gap:7px;
+    padding:8px 15px;
+    border-radius:999px;
+    border:1px solid var(--line);
+    background:var(--bg-2);
+    cursor:pointer;
+    font-size:12.5px; font-weight:500;
+    color:var(--ink-2);
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  .cap:hover { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+  .cap.on { border-color:var(--accent); background:var(--accent); color:var(--on-accent); font-weight:600; }
+  .cap svg { width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:1.7; }
+
+  /* 已选能力回显框 */
+  .pickedbox {
+    display:inline-flex; flex-direction:column; align-items:center; gap:2px;
+    max-width:100%; padding:13px 20px;
+    background:var(--bg-2); border:1px solid var(--line); border-radius:var(--r-lg);
+  }
+  .pickedbox .pk { font-size:11px; font-weight:600; color:var(--muted); letter-spacing:.3px; }
+  .pickedbox .pl {
+    font-size:13px; color:var(--ink); line-height:1.75; text-align:center;
+    word-break:break-word;
+  }
+
+  /* 设置分类导航 */
+  .setwrap { display:flex; gap:28px; max-width:1100px; margin:0 auto; padding:32px 28px 80px; }
+  .setnav { width:200px; flex:0 0 200px; }
+  .setnav .it {
+    display:flex; align-items:center; gap:10px;
+    padding:9px 12px;
+    border-radius:var(--r);
+    cursor:pointer;
+    font-size:13.5px; font-weight:500;
+    color:var(--ink-2);
+    transition:color .15s, background .15s;
+  }
+  .setnav .it:hover { color:var(--ink); background:var(--panel-2); }
+  .setnav .it.on { color:var(--accent); background:var(--accent-soft); font-weight:650; }
+  .setnav .it svg { width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:1.7; }
+  .setmain { flex:1; min-width:0; }
+  .setmain h2 { font-size:22px; margin:0 0 6px; font-weight:700; letter-spacing:-.5px; }
+  .setmain .lead { color:var(--muted); font-size:13.5px; margin:0 0 24px; }
+
+  /* 人设 */
+  .persona {
+    display:flex; flex-direction:column;
+    align-items:center; text-align:center;
+    padding:24px 0 20px;
+    max-width:680px;
+    margin:0 auto;
+  }
+  .persona .orb {
+    width:72px; height:72px;
+    border-radius:50%;
+    background:var(--accent-soft);
+    border:1px solid var(--accent-line);
+    color:var(--accent);
+    display:grid; place-items:center;
+    font-size:26px;
+    font-weight:700;
+    margin-bottom:16px;
+  }
+  .persona h3 { margin:0 0 10px; font-size:20px; font-weight:700; letter-spacing:-.3px; }
+  .persona .tags { display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; justify-content:center; }
+  .persona .tag {
+    background:var(--bg-2);
+    color:var(--ink-2);
+    border-radius:999px;
+    border:1px solid var(--line);
+    padding:4px 12px;
+    font-size:11px; font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:.6px;
+  }
+  .persona .feat { text-align:left; max-width:620px; width:100%; }
+  .persona .feat h4 {
+    font-weight:700;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.8px;
+    color:var(--muted);
+    margin:16px 0 5px;
+  }
+  .persona .feat p { margin:0; font-size:13.5px; line-height:1.78; color:var(--ink); }
+
+  #notice {
+    position:fixed; left:50%; bottom:30px;
+    transform:translate(-50%, 8px);
+    background:var(--ink);
+    color:var(--bg);
+    border-radius:999px;
+    padding:9px 20px;
+    font-size:13px; font-weight:500;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .22s ease, transform .22s ease;
+    z-index:90;
+    box-shadow:var(--shadow-lg);
+  }
+  #notice.on { opacity:1; transform:translate(-50%, 0); }
+
+  /* ══════════ 两行截断 ══════════
+     Edge 157 起，`display:-webkit-box` 被规范化成了 `flow-root` ——
+     基于 box 布局的 `-webkit-line-clamp` **全线失效**：
+     文字被硬切，末尾**没有省略号**，用户不知道后面还有内容。
+
+     所以不再依赖那个已被移除的特性，改成两件事：
+     1. CSS 固定高度 + `overflow:hidden`（保证不撑破布局）
+     2. JS 判断有没有溢出，溢出才补一个省略号（`applyClamp`）
+
+     短文本不会平白多一个省略号 —— 那才是真正让人烦的。 */
+  .clamp2 { position:relative; overflow:hidden; }
+  .clamp2.is-clipped::after {
+    content:"…";
+    position:absolute; right:0; bottom:0;
+    padding-left:16px;
+    /* 背景色跟卡片一致，省略号才是「顶在文字上」而不是「浮在旁边」 */
+    background:linear-gradient(to right, transparent, var(--card) 42%);
+    color:var(--muted);
+    pointer-events:none;
+  }
+
+  /* 人设列表的圆形头像。
+     以前是**内联样式**（连颜色都写死在 style 里）——
+     改个选中态的颜色得去 JS 里翻，改主题色更是改不动。
+     而且内联的 `#fff` 在暗色主题下跟背景撞色。
+     挪进样式表，选中态走 `.on`，颜色走变量。 */
+  .setnav .it .navav {
+    width:22px; height:22px; flex:0 0 22px;
+    border-radius:50%;
+    /* 用 accent 的浅底 + accent 字，跟技能广场的图标块是同一套语言。
+       原来用灰底灰字 —— 在暗色主题下几乎隐形（对比度 2.69:1）。 */
+    background:var(--accent-soft); color:var(--accent);
+    display:grid; place-items:center;
+    font-size:11px; font-weight:700;
+    transition:background .15s, color .15s;
+  }
+  .setnav .it.on .navav { background:var(--accent); color:var(--on-accent); }

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Oryx</title>
+<style>
+  :root {
+    --bg: #F6F6F8;
+    --card: #FFFFFF;
+    --line: #E3E3E8;
+    --ink: #17171B;
+    --ink-2: #4C4C55;
+    --muted: #8B8B95;
+    --accent: #4F46E5;
+    --accent-2: #818CF8;
+    --accent-soft: #EEF0FD;
+  }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    display: grid; place-items: center;
+    font: 14px/1.6 "Inter Tight", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none;
+    overflow: hidden;
+  }
+  .box { text-align: center; animation: fade .35s ease-out; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  .mark {
+    width: 84px; height: 84px; margin: 0 auto 22px;
+    border-radius: 22px;
+    background: linear-gradient(135deg, #4F46E5 0%, #6D64F0 55%, #818CF8 100%);
+    box-shadow: 0 12px 32px rgba(79, 70, 229, .28), inset 0 1px 0 rgba(255,255,255,.25);
+    display: grid; place-items: center;
+  }
+  .mark svg { display: block; }
+
+  .logo { font-size: 30px; font-weight: 700; letter-spacing: .5px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 12.5px; letter-spacing: 3px; margin-bottom: 40px; }
+
+  .bar {
+    width: 200px; height: 4px; margin: 0 auto;
+    background: var(--line); border-radius: 99px; overflow: hidden;
+  }
+  .bar i {
+    display: block; height: 100%; width: 38%; border-radius: 99px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    animation: slide 1.1s cubic-bezier(.45,0,.55,1) infinite;
+  }
+  @keyframes slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(400%); } }
+
+  .status { margin-top: 18px; color: var(--muted); font-size: 12.5px; min-height: 20px; letter-spacing: .3px; }
+
+  .error {
+    color: #DC2626; margin: 22px auto 0; font-size: 13px; line-height: 2;
+    max-width: 480px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px 18px;
+  }
+  code {
+    background: var(--accent-soft); color: var(--accent);
+    padding: 2px 8px; border-radius: 6px;
+    font-family: "JetBrains Mono", Consolas, monospace; font-size: 12px;
+  }
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="mark">
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+        <path d="M18.8 15.8 17.2 3.8" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+        <path d="M29.2 15.8 30.8 3.8" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="24" cy="27" r="10.5" stroke="#fff" stroke-width="4.6"/>
+      </svg>
+    </div>
+    <div class="logo">Oryx</div>
+    <div class="sub">本地 AGENT</div>
+    <div class="bar"><i></i></div>
+    <div class="status" id="status">正在启动内核…</div>
+    <div class="error" id="error" style="display:none"></div>
+  </div>
+
+<script>
+  const PORT = 8765;
+  const BASE = `http://127.0.0.1:${PORT}`;
+  const started = Date.now();
+
+  async function poll() {
+    try {
+      // 用公开无副作用的探活接口；带令牌的业务接口由内核自己下发页面
+      const res = await fetch(`${BASE}/api/ping`, { cache: 'no-store' });
+      if (res.ok) {
+        document.getElementById('status').textContent = '已连接，正在载入界面…';
+        window.location.replace(BASE);
+        return;
+      }
+    } catch (_) { /* 内核还没起来 */ }
+
+    const elapsed = (Date.now() - started) / 1000;
+    if (elapsed > 30) {
+      document.querySelector('.bar').style.display = 'none';
+      document.getElementById('status').textContent = '内核启动超时';
+      const err = document.getElementById('error');
+      err.style.display = 'block';
+      err.innerHTML =
+        '请手动在项目目录执行：<br><code>cd core &amp;&amp; python -m oryx</code><br>' +
+        '确认命令行没有报错，然后重新打开本窗口。';
+      return;
+    }
+    document.getElementById('status').textContent =
+      elapsed > 3 ? `内核启动中…（${Math.round(elapsed)} 秒）` : '正在启动内核…';
+    // 前 5 秒密集探测（内核冷启动约 2.5s），之后放宽
+    setTimeout(poll, elapsed > 5 ? 500 : 160);
+  }
+
+  poll();
+</script>
+</body>
+</html>

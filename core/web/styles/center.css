@@ -1,0 +1,550 @@
+/* 主区：顶栏、消息流、输入框、附件、模式提示
+   —— 从 `main.css` 按原顺序切出。层叠顺序与拆分前完全一致。 */
+
+  /* ══════════ 主区 ══════════ */
+  #center {
+    flex:1; display:flex; flex-direction:column; min-width:0;
+    background:var(--bg);
+    /* 内容列与输入框共用的宽度与左边距。
+       两个值都由 JS 用 ResizeObserver 量出来写进来（见 fitChatCol）。
+
+       为什么不用 min(1004px, 100% - 88px) 这种百分比公式：
+       .wrap 在 #scroll 里（滚动条占 8px）、.cbox 在 #composer 里，
+       两个 100% 的包含块宽度不同，算出来的居中位置不一样，
+       正文列和输入框就对不齐了。
+       所以两边都用**同一个** --chat-gutter 做左边距（而不是各自 margin:auto），
+       左缘、右缘才能严格对齐。 */
+    --chat-col: 880px;
+    --chat-gutter: 24px;
+  }
+  .topbar {
+    display:flex; align-items:center; gap:7px;
+    padding:10px 10px;
+    border-bottom:1px solid var(--line);
+    background:var(--bg-2);
+    flex-wrap:nowrap;
+  }
+  .topbar h1 { font-size:14.5px; margin:0; font-weight:600; letter-spacing:-.2px; white-space:nowrap; }
+  .topbar .sub {
+    font-family:var(--font-mono);
+    font-size:10.5px; color:var(--muted);
+    letter-spacing:.3px;
+  }
+  /* 空间紧的时候，「云端模型」这类**副标题**先退 ——
+     它是信息，不是控件；退掉之后能省出位置给「专业」「效率」，
+     那两个是**功能选择器**，用户得能点到。 */
+  .topbar[data-fit="tight"] .sub,
+  .topbar[data-fit="ultra"] .sub,
+  .topbar[data-fit="mini"] .sub { display:none; }
+  .seg {
+    display:inline-flex;
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:3px;
+    background:var(--bg);
+    gap:2px;
+    flex:0 0 auto;
+  }
+  .seg button {
+    border:0;
+    background:transparent;
+    color:var(--muted);
+    padding:4px 7px;
+    cursor:pointer;
+    font-size:12px;
+    font-weight:500;
+    border-radius:999px;
+    white-space:nowrap;
+    transition:background .15s, color .15s;
+  }
+  .seg button:hover { color:var(--ink); }
+  .seg button.on { background:var(--bg-2); color:var(--ink); font-weight:600; box-shadow:var(--shadow); }
+  .btn {
+    border:1px solid var(--line-strong); background:var(--bg-2);
+    border-radius:var(--r);
+    padding:5px 9px; cursor:pointer;
+    font-size:12px; font-weight:500; color:var(--ink-2);
+    white-space:nowrap;
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  .btn:hover { border-color:var(--muted); color:var(--ink); }
+  /* 顶栏里的下拉收紧 —— 原生 select 的箭头占位很宽，
+     「无专家」一个小下拉要 100px，把模型名的位置挤没了。
+     限宽 + 少留右边距，省下的宽度给模型 chip。 */
+  .topbar select.btn {
+    max-width:72px; padding:5px 4px 5px 7px;
+    text-overflow:ellipsis;
+  }
+  .btn.primary {
+    background:var(--accent);
+    border-color:var(--accent);
+    color:var(--on-accent);
+    font-weight:600;
+  }
+  .btn.primary:hover { color:var(--on-accent); filter:brightness(1.08); }
+  .btn.ghost { border-color:transparent; background:transparent; }
+  .btn:disabled { opacity:.4; cursor:not-allowed; }
+  .spacer { flex:1; }
+  .chip {
+    font-family:var(--font-mono);
+    font-size:11px; color:var(--ink-2);
+    background:var(--bg);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:3px 12px;
+    white-space:nowrap;
+  }
+
+  #scroll { flex:1; overflow-y:auto; }
+  /* 横向留白统一由 --chat-gutter 给（见 fitChatCol）——
+     不叠 padding、不用 margin:auto，正文列和输入框才能严格同宽同位。 */
+  .wrap {
+    width:var(--chat-col);
+    margin-left:var(--chat-gutter);
+    padding:32px 0 18px;
+  }
+
+  /* 空会话引导卡 —— 按三种权限姿态给「明确的下一步」 */
+  .welcome {
+    max-width:760px; margin:6px auto 0;
+    padding:26px 28px 22px;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--r-lg);
+    box-shadow:var(--shadow-md);
+    animation:rise var(--dur-slow) var(--ease) both;
+  }
+  .welcome .whead { display:flex; gap:14px; align-items:flex-start; margin-bottom:24px; }
+  .welcome .wlogo {
+    width:38px; height:38px; flex:0 0 38px;
+    display:grid; place-items:center;
+    border-radius:12px;
+    background:var(--accent); color:var(--on-accent);
+    font-size:13px; font-weight:700; letter-spacing:.5px;
+  }
+  .welcome .whead h2 { margin:2px 0 6px; font-size:var(--fs-lg); font-weight:650; letter-spacing:-.2px; }
+  .welcome .whead p { margin:0; font-size:var(--fs-sm); color:var(--ink-2); line-height:1.7; }
+  .welcome .wgroup { margin-bottom:18px; }
+  .welcome .wgtitle { display:flex; align-items:center; gap:10px; margin-bottom:9px; flex-wrap:wrap; }
+  .welcome .wgtag {
+    font-size:var(--fs-xs); font-weight:650; padding:2px 9px; border-radius:999px;
+    background:var(--accent-soft); color:var(--accent);
+  }
+  .welcome .wgtag.plan { background:var(--warn-soft, var(--panel-2)); color:var(--warn, var(--ink-2)); }
+  .welcome .wgtag.ask { background:var(--panel-2); color:var(--muted); }
+  .welcome .wghint { font-size:var(--fs-xs); color:var(--muted); }
+  .welcome .wcards { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:8px; }
+  .welcome .wcard {
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    text-align:left; padding:10px 12px;
+    font-size:var(--fs-sm); color:var(--ink);
+    background:var(--bg-2); border:1px solid var(--line);
+    border-radius:var(--r); cursor:pointer;
+    transition:border-color var(--dur-fast) ease, transform var(--dur-fast) ease, background var(--dur-fast) ease;
+  }
+  .welcome .wcard:hover {
+    border-color:var(--accent-line); background:var(--panel-2);
+    transform:translateY(-1px);
+  }
+  .welcome .wcard .wgo { color:var(--muted); font-size:13px; flex:0 0 auto; }
+  .welcome .wcard:hover .wgo { color:var(--accent); }
+  .welcome .wfoot {
+    margin-top:20px; padding-top:14px; border-top:1px solid var(--line);
+    font-size:var(--fs-xs); color:var(--muted); line-height:1.7;
+  }
+
+  /* 对话消息 */
+  .msg { display:flex; gap:12px; margin-bottom:26px; }
+  .msg .av {
+    /* 24×24 —— 对齐 Marvis 的 .semi-ai-chat-dialogue-avatar */
+    width:24px; height:24px; flex:0 0 24px;
+    display:grid; place-items:center;
+    font-size:10px; font-weight:700;
+    border-radius:50%;
+    background:var(--user-av);
+    color:var(--ink-2);
+  }
+  .msg.bot .av { background:var(--bot-av); color:var(--bot-fg); font-size:10px; letter-spacing:.2px; }
+  .msg .body { flex:1; min-width:0; }
+  .bubble {
+    white-space:pre-wrap; word-break:break-word;
+    font-size:15px; line-height:1.7;
+    color:var(--ink);
+  }
+  .msg.user .bubble {
+    background:var(--user-bg);
+    color:var(--user-fg);
+    padding:12px 16px;
+    border-radius:16px 16px 4px 16px;
+    display:inline-block;
+    max-width:min(600px, 78%);
+  }
+  .msg.bot .bubble { padding:2px 0; }
+
+  /* 用户消息在右、机器人在左（对齐 Marvis）。
+     之前两边都左对齐、整列又居中，右边完全没有锚点 ——
+     视觉上所有内容都像"被推到中间偏右"。 */
+  .msg.user { flex-direction:row-reverse; }
+  .msg .body { display:flex; flex-direction:column; align-items:flex-start; }
+  .msg.user .body { align-items:flex-end; }
+
+  /* 消息操作栏（对齐 Marvis 的 .semi-ai-chat-dialogue-action）：
+     复制 / 重新生成。悬停才显形，不抢正文的注意力。
+     只挂在助手消息上 —— 用户自己的话没什么可"重新生成"的。
+
+     位置：放在 .body 列里、正文**下方**（对齐 Marvis 的
+     .semi-ai-chat-dialogue-action —— 它在 content-inner 之下，
+     margin-left 对齐头像列）。不能作为 .msg 的第三个 flex 子元素：
+     那样会被挤到消息行右侧，跑到正文后面去了。 */
+  .mactions {
+    display:flex; gap:2px;
+    margin-top:8px;
+    /* 用 opacity 而不是 visibility 隐藏 ——
+       visibility:hidden 的元素**接不到焦点**，
+       :focus-within 永远不触发，键盘用户 Tab 过来会「看不见地」聚焦。
+       opacity 隐藏的元素仍可聚焦，Tab 进来时靠 :focus-within 现形。 */
+    opacity:0; pointer-events:none;
+    transition:opacity .15s ease;
+    flex:0 0 auto; align-self:flex-start;
+  }
+  .msg.bot:hover .mactions,
+  .mactions:focus-within { opacity:1; pointer-events:auto; }
+  .maction {
+    width:24px; height:24px;          /* Marvis 的 action-btn 就是 24×24 */
+    border:0; background:transparent;
+    color:var(--muted);
+    border-radius:var(--r);
+    display:grid; place-items:center;
+    cursor:pointer;
+    transition:color .15s, background .15s;
+  }
+  .maction:hover { color:var(--ink); background:var(--panel-2); }
+  .maction:focus-visible { outline:2px solid var(--accent); outline-offset:1px; color:var(--ink); }
+  .maction svg {
+    width:14px; height:14px;
+    fill:none; stroke:currentColor;
+    stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round;
+  }
+  .maction:disabled { opacity:.4; cursor:not-allowed; }
+  /* 复制成功时给个正反馈 —— 按钮本身短暂高亮，
+     光靠 toast 的话，鼠标已经移开了、用户不知道成没成 */
+  .maction.done { color:var(--ok); background:var(--ok-soft); }
+
+  /* 「回退到这里」：挂在每轮提问下方的撤销入口。
+     跟 .mactions 一样悬停才显形 —— 它是补救动作，不该抢正文的注意力。
+     但不能像 .mactions 那样完全透明：那按钮用户根本发现不了，
+     「改错了能撤」这个能力就等于没有。所以常态是淡的、悬停才醒目。 */
+  .rewindbar {
+    display:flex; align-items:center; gap:6px;
+    margin-top:6px;
+    opacity:.55;
+    transition:opacity .15s ease;
+  }
+  .msg.user:hover .rewindbar,
+  .rewindbar:focus-within { opacity:1; }
+  .rbtn {
+    display:inline-flex; align-items:center; gap:5px;
+    height:22px; padding:0 9px;
+    border:1px solid var(--line);
+    background:var(--panel-2);
+    color:var(--muted);
+    border-radius:999px;
+    font-size:11px;
+    cursor:pointer;
+    transition:color .15s, border-color .15s, background .15s;
+  }
+  .rbtn:hover { color:var(--ink); border-color:var(--accent); background:var(--accent-soft); }
+  .rbtn:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .rbtn:disabled { opacity:.5; cursor:not-allowed; }
+  .rbtn svg { width:12px; height:12px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+
+  /* 检查点时间线（右栏「详情」页里） */
+  .cplist { display:flex; flex-direction:column; gap:2px; }
+  .cpitem {
+    display:flex; align-items:center; gap:8px;
+    padding:7px 9px; border-radius:var(--r);
+    border:1px solid transparent;
+  }
+  .cpitem:hover { background:var(--panel-2); }
+  .cpitem.cur { border-color:var(--accent); background:var(--accent-soft); }
+  .cpdot { width:6px; height:6px; border-radius:50%; background:var(--muted); flex:0 0 6px; }
+  .cpitem.cur .cpdot { background:var(--accent); }
+  .cplabel { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:var(--ink); }
+  .cpmeta { flex:0 0 auto; font-size:11px; color:var(--muted); }
+
+  /* 思考中提示：三点跳动 + 文案随阶段变化 */
+  .msg.thinking .body { padding-top:3px; }
+  .thinkrow { display:flex; align-items:center; gap:9px; font-size:13px; color:var(--muted); }
+  .thinkrow .tdots { display:inline-flex; gap:3px; align-items:center; }
+  .thinkrow .tdots i {
+    width:4px; height:4px; border-radius:50%; background:var(--accent);
+    animation:thinkdot var(--dur-loop) infinite ease-in-out;
+  }
+  .thinkrow .tdots i:nth-child(2) { animation-delay:.16s; }
+  .thinkrow .tdots i:nth-child(3) { animation-delay:.32s; }
+  @keyframes thinkdot { 0%,64%,100% { opacity:.28; transform:translateY(0); } 32% { opacity:1; transform:translateY(-3px); } }
+
+  /* 思考过程面板（对齐 Marvis 的 ai-chat-dialogue-reasoning）：
+     一个可点击展开的面板，标题是「正在思考中…」/「已思考完成」，
+     思考内容在下面，展开时才显示。
+     规格取自 Marvis：wrapper radius 12px、header padding 16px、
+     标题 font-weight 600、content padding 12px 16px。 */
+  .reason {
+    margin-bottom:10px;
+    border:1px solid var(--line);
+    border-radius:var(--r-lg);
+    background:var(--code);
+    overflow:hidden;
+    max-width:100%;
+  }
+  .reason-head {
+    display:flex; align-items:center; gap:8px;
+    padding:12px 14px;
+    cursor:pointer;
+    font-size:12.5px; color:var(--muted);
+    user-select:none;
+  }
+  .reason-head:hover { color:var(--ink-2); }
+  .reason-head .ric { display:inline-flex; flex:0 0 auto; }
+  .reason-head svg { width:13px; height:13px; }
+  .reason-title { flex:1; min-width:0; font-weight:600; }
+  .reason-caret { transition:transform .18s ease; }
+  .reason.open .reason-caret { transform:rotate(90deg); }
+  .reason-body {
+    display:none;
+    padding:12px 14px;
+    font-size:12.5px; line-height:1.68;
+    color:var(--ink-2);
+    white-space:pre-wrap; word-break:break-word;
+    border-top:1px solid var(--line);
+    max-height:46vh; overflow:auto;
+  }
+  .reason.open .reason-body { display:block; }
+  .reason.live .reason-head { color:var(--accent); }
+  /* 思考中默认展开，但**用户手动收起后要能保持收起**。
+     不能写成 `.reason.live .reason-body { display:block }` ——
+     它和 `.reason.open .reason-body` 特异度相同、位置更靠后，
+     会把 open 覆盖掉：思考中点标题永远收不起来。
+
+     这里用一个独立的"被手动收起"标记，而不是靠 open 的反向：
+     收起时面板没有 open 类，用 :not(.open) 判断反而仍会匹配、强制展开。
+     JS 在 toggle 里给 el.dataset.collapsed = '1'，
+     这条规则只在那个标记存在时才强制展开。 */
+  .reason.live:not([data-collapsed]) .reason-body { display:block; }
+
+  /* 助手消息 markdown 渲染 */
+  .bubble .mdpre {
+    background:var(--code);
+    border:1px solid var(--line);
+    border-radius:var(--r);
+    padding:10px 12px; margin:8px 0;
+    overflow:auto; white-space:pre;
+    font-family:var(--font-mono); font-size:12px; line-height:1.6;
+  }
+  .bubble .mdcode {
+    font-family:var(--font-mono); font-size:.88em;
+    border-radius:5px; padding:1px 5px;
+    background:var(--code);
+    color:var(--accent);
+  }
+  .bubble .mdul, .bubble .mdol { margin:6px 0; padding-left:22px; white-space:normal; }
+  .bubble .mdul li, .bubble .mdol li { margin:2px 0; }
+  .bubble .mdh {
+    display:block; font-weight:650;
+    font-size:15px; margin:12px 0 4px;
+  }
+  .bubble strong { font-weight:650; }
+
+  /* Agent 状态行 */
+  .agentline {
+    display:flex; align-items:center; gap:8px;
+    font-family:var(--font-mono);
+    font-size:11px; color:var(--muted);
+    letter-spacing:.4px;
+    margin:6px 0 8px;
+    padding:6px 10px;
+    background:var(--accent-soft);
+    border-radius:var(--r);
+    flex-wrap:wrap;
+  }
+  .agentline .nm { color:var(--accent); font-weight:600; }
+  .agentline .tool { color:var(--ink); font-weight:500; }
+  .agentline .dots { display:inline-flex; gap:3px; }
+  .agentline .dots i { width:4px; height:4px; border-radius:50%; background:var(--accent); animation:bl var(--dur-loop) infinite; }
+  .agentline .dots i:nth-child(2){animation-delay:.16s} .agentline .dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bl { 0%,60%,100%{opacity:.25} 30%{opacity:1} }
+  .narr { color:var(--muted); font-size:12.5px; margin:0 0 9px; padding-left:42px; }
+  .thinking { color:var(--muted); font-style:italic; }
+
+  /* ══════════ 多 Agent 对话流 ══════════
+     对标 Marvis 的 WorkLog：每个 Agent 一段，段头吸顶，
+     下面挂它的发言。管家之间、管家与 Oryx 之间的来回都走这里。 */
+  .tl {
+    margin:14px 0 4px;
+    border-left:2px solid var(--line);
+    padding-left:14px;
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .tlsec { position:relative; }
+  /* 段头：谁在说话 */
+  .tlhead {
+    display:flex; align-items:center; gap:8px;
+    margin-bottom:7px;
+  }
+  .tlhead .av {
+    width:26px; height:26px; flex:0 0 26px; border-radius:50%;
+    display:grid; place-items:center;
+    background:var(--card); border:1px solid var(--line);
+    font-size:12px; color:var(--accent);
+  }
+  .tlhead .nm { font-size:12.5px; font-weight:650; color:var(--ink); }
+  .tlhead .rl { font-size:10.5px; color:var(--muted); }
+  .tlhead .dots { display:inline-flex; gap:3px; }
+  .tlhead .dots i { width:4px; height:4px; border-radius:50%; background:var(--accent); animation:bl var(--dur-loop) infinite; }
+  .tlhead .dots i:nth-child(2){animation-delay:.16s} .tlhead .dots i:nth-child(3){animation-delay:.32s}
+  /* 一条发言：无气泡，缩进在时间线里 */
+  .tlmsg {
+    font-size:13.5px; line-height:1.75; color:var(--ink-2);
+    padding:2px 0 2px 34px;
+  }
+  .tlmsg.me { color:var(--ink); }
+  /* 没产出：整条压暗 + 标注 —— 别让它看着像一条正常回复 */
+  .tlmsg.dim { color:var(--muted); font-style:italic; }
+  .tlmsg .tag {
+    display:inline-block; font-size:10.5px; color:var(--muted);
+    margin-right:6px; vertical-align:1px;
+    border:1px solid var(--line); border-radius:999px; padding:0 6px;
+  }
+  /* 派活时的「拍了拍」提示：居中灰字，把系统日志变成人话 */
+  .tlpoke {
+    text-align:center; font-size:11.5px; color:var(--muted);
+    opacity:.72; padding:3px 0; margin:2px 0;
+  }
+  /* 确认卡 */
+  .plan {
+    border:1px solid var(--accent-line);
+    background:var(--accent-soft);
+    border-radius:var(--r-lg);
+    padding:16px 20px;
+    margin:14px 0;
+    position:relative;
+  }
+  .plan .h {
+    font-weight:650;
+    font-size:14.5px;
+    color:var(--ink);
+    margin-bottom:6px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .plan .h::before {
+    content:"请确认";
+    font-size:10px; font-weight:700; color:var(--accent);
+    background:color-mix(in srgb, var(--accent) 14%, transparent);
+    border-radius:999px; padding:2px 9px;
+    text-transform:uppercase; letter-spacing:.6px;
+  }
+  .plan .s { font-size:13px; color:var(--ink-2); margin-bottom:12px; line-height:1.7; }
+  .plan .act {
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--r);
+    padding:10px 14px;
+    margin-bottom:7px;
+  }
+  .plan .act .k {
+    font-size:10.5px;
+    color:var(--accent);
+    font-weight:700;
+    text-transform:uppercase; letter-spacing:.8px;
+    font-family:var(--font-mono);
+  }
+  .plan .act .t {
+    font-family:var(--font-mono);
+    font-size:12.5px; word-break:break-all;
+    color:var(--ink);
+    margin-top:3px;
+  }
+  .plan .act .d { font-size:12px; color:var(--muted); margin-top:3px; }
+  .plan .act .i {
+    font-size:11px; color:var(--muted); margin-top:6px;
+    padding-top:6px; border-top:1px dashed var(--line);
+    display:flex; align-items:center; gap:6px;
+  }
+  .plan .act .i b {
+    font-weight:650; color:var(--danger);
+    background:var(--danger-soft); border-radius:999px; padding:1px 8px;
+  }
+  .plan .act .i.safe b { color:var(--ok, var(--accent)); background:var(--accent-soft); }
+  .plan .btns { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+
+  /* 输入区 */
+  #composer { padding:10px 0 18px; }
+  .cbox {
+    /* 与 .wrap 同宽同位（同一个 --chat-col / --chat-gutter）——
+       不然输入框和消息列对不齐，看着就像两个不同的界面 */
+    width:var(--chat-col);
+    margin-left:var(--chat-gutter);
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--r-lg);
+    padding:12px 14px;
+    box-shadow:var(--shadow-md);
+    position:relative;
+    transition:border-color .2s, box-shadow .2s;
+  }
+  .cbox:focus-within { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  #input {
+    width:100%;
+    border:0; background:transparent; outline:none;
+    resize:none;
+    /* 高度随内容增长（autoGrow 在 JS 里按 scrollHeight 调），
+       到 200px 封顶后内部滚动 */
+    min-height:54px; max-height:200px; overflow-y:auto;
+    font-size:14px; line-height:1.7;
+    color:var(--ink);
+    padding:2px 4px;
+  }
+  #input::placeholder { color:var(--muted); }
+  .crow {
+    display:flex; align-items:flex-end; gap:8px; margin-top:8px;
+  }
+  /* 芯片区自己换行，发送键永远钉在右下角 */
+  .crow .chipsbar { flex:1 1 auto; min-width:0; }
+  .crow > .spacer { flex:0 0 0; }
+  .sendbtn { flex:0 0 auto; margin-bottom:2px; }
+  .sendbtn {
+    width:34px; height:34px;
+    border-radius:50%;
+    border:0;
+    background:var(--accent);
+    color:var(--on-accent);
+    cursor:pointer;
+    display:grid; place-items:center;
+    margin-left:auto;
+    transition:filter .15s, transform .15s;
+    box-shadow:var(--shadow);
+  }
+  .sendbtn:hover { filter:brightness(1.1); transform:translateY(-1px); }
+  .sendbtn.stop { background:var(--danger); }
+  /* 跑着的时候发送键变成「停止」：红色方块 + 一圈脉冲，
+     一眼就知道现在按它会停下来，而不是又发一条。 */
+  .sendbtn.stopping { background:var(--danger); }
+  .sendbtn.stopping::after {
+    content:""; position:absolute; inset:0;
+    border-radius:50%; border:1.5px solid var(--danger);
+    animation: stopPulse var(--dur-loop) ease-out infinite;
+  }
+  .sendbtn { position:relative; }
+  @keyframes stopPulse {
+    0% { opacity:.7; transform:scale(1); }
+    100% { opacity:0; transform:scale(1.55); }
+  }
+  .sendbtn:disabled { opacity:.35; cursor:not-allowed; transform:none; }
+  .sendbtn svg { width:15px; height:15px; fill:currentColor; }
+  .disclaimer {
+    text-align:center;
+    font-size:11px;
+    color:var(--muted);
+    margin-top:10px;
+  }
+

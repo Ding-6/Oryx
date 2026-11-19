@@ -1,0 +1,17 @@
+{
+  "apiVersion": "oryx/v1",
+  "kind": "skill",
+  "id": "file-organizer",
+  "version": "1.0.0",
+  "displayName": "文件整理",
+  "description": "按类型、时间或主题整理文件目录，迁移动文件前必须先给出整理方案。",
+  "triggers": ["整理文件", "归类", "清理目录", "整理下载", "分类文件"],
+  "eager": false,
+  "allowedTools": ["fs_list", "fs_glob", "fs_move", "fs_mkdir"],
+  "caps": ["fs.read", "fs.write"],
+  "contracts": {
+    "gates": ["先给出整理方案并等用户确认", "说明每个分类的目标目录与数量"],
+    "fail_closed_when": ["目标目录不可写", "待移动文件超过 50 个且用户未确认"],
+    "handoffs": []
+  }
+}

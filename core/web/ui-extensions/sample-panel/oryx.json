@@ -1,0 +1,14 @@
+{
+  "id": "sample-panel",
+  "name": "示例面板",
+  "version": "1.0.0",
+  "description": "演示前端扩展怎么挂到左栏。",
+  "mount": "rail",
+  "order": 100,
+  "caps": [],
+  "enabled": false,
+  "baseCss": [
+    "btn",
+    "iconbtn"
+  ]
+}

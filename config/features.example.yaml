@@ -1,0 +1,12 @@
+# Oryx 特性开关（示例）
+# 实际文件：%APPDATA%/Oryx/features.yaml（首次运行自动生成）
+# 默认 profile：personal（面向个人单机）
+
+profile: personal
+
+# 在此覆盖默认开关（详见 core/oryx/features.py）
+flags:
+  # 启用跨进程反向分析：把 REA 当 MCP server 拉起来
+  EnableReaMcp: false
+  # 关闭/打开自动化任务
+  EnableAutomation: true

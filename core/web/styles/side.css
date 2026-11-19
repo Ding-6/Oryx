@@ -1,0 +1,349 @@
+/* 右栏：七个页签、执行步骤、任务、团队、总览
+   —— 从 `main.css` 按原顺序切出。层叠顺序与拆分前完全一致。 */
+
+  /* ══════════ 右栏 ══════════ */
+  #side {
+    width:clamp(180px, var(--side-w,224px), 22vw); flex:0 0 clamp(180px, var(--side-w,224px), 22vw);
+    border-left:1px solid var(--line);
+    background:var(--bg);
+    display:flex; flex-direction:column; min-height:0;
+    position:relative;
+  }
+  .stabs {
+    display:flex; gap:2px;
+    padding:12px 6px 0;
+    border-bottom:1px solid var(--line);
+    background:var(--bg-2);
+  }
+  .stabs button {
+    flex:1 1 auto; min-width:0; background:transparent; border:0;
+    padding:8px 1px 10px;
+    cursor:pointer;
+    font-size:11.5px; font-weight:500;
+    color:var(--muted);
+    border-bottom:2px solid transparent;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    transition:color .15s, border-color .15s;
+  }
+  .stabs button:hover { color:var(--ink); }
+  .stabs button.on {
+    color:var(--accent);
+    border-bottom-color:var(--accent);
+    font-weight:650;
+  }
+  /* 折叠按钮**悬浮在分隔线上**，不占页签的横向空间。
+     原来它占着 28px，右栏收窄后七个页签挤成一团
+     （「执行任务团队终端」连在一起，看不出是七个标签）。
+     改成绝对定位 + 负右边距，页签就能均分整个宽度。 */
+  /* 给悬浮的折叠按钮留出 22px —— 不留的话它会盖住最后一个页签（「详情」） */
+  .stabs { position:relative; padding-right:22px; }
+  .stabs .stcollapse {
+    position:absolute; right:-1px; top:0; bottom:0;
+    width:22px; padding:8px 0; border-bottom:2px solid transparent;
+    background:var(--bg-2);
+    border-left:1px solid var(--line);
+  }
+  .stcollapse svg {
+    width:14px; height:14px; fill:none; stroke:var(--muted);
+    stroke-width:2; stroke-linecap:round; stroke-linejoin:round;
+  }
+  .stcollapse:hover svg { stroke:var(--accent); }
+  .sbody { flex:1; overflow-y:auto; padding:14px 16px; }
+  .pane { display:none } .pane.on { display:block }
+  /* 七个页签在窄屏下允许横向滚动，别把标签挤成一团看不清 */
+  .stabs { overflow-x:auto; scrollbar-width:none; }
+  .stabs::-webkit-scrollbar { display:none; }
+  /* 七个页签**均分**右栏宽度 —— 右栏收窄到 244px 后，
+     「总览 执行 任务 团队 终端 产物 详情」要**一屏放得下**。
+     以前 `min-width:46px` + `flex:0 0 auto` → 七个要 322px，
+     放不下就变横向滚动，用户得自己拖才看得到最后两个。
+     均分后每个约 29px，两字标签放得下。 */
+  .stabs button[data-p] { flex:1 1 0; min-width:0; padding:8px 0 10px; }
+
+  /* ══ 运行中主动建议（Marvis 式「下一步」）══ */
+  .sugbox {
+    margin:14px 0 6px 46px; padding:12px 14px;
+    border:1px solid var(--accent-line); border-radius:var(--r-lg);
+    background:var(--accent-soft);
+    animation:rise var(--dur-slow) var(--ease) both;
+  }
+  .sugh { font-size:11.5px; font-weight:700; color:var(--accent); margin-bottom:9px; }
+  .sugh span { font-weight:400; opacity:.72; margin-left:6px; }
+  .suglist { display:flex; flex-wrap:wrap; gap:7px; }
+  .sug {
+    border:1px solid var(--accent-line); border-radius:99px;
+    background:var(--card); color:var(--ink);
+    padding:6px 12px; font-size:12px; cursor:pointer;
+    transition:transform .15s var(--ease), border-color .15s, box-shadow .15s;
+  }
+  .sug:hover, .sug:focus-visible {
+    border-color:var(--accent); transform:translateY(-1px); box-shadow:var(--shadow-md);
+  }
+  .sug::before { content:'↗'; color:var(--accent); margin-right:5px; font-size:11px; }
+
+  /* ══ 多 Agent 一屏总览 ══ */
+  .ovhead {
+    border:1px solid var(--line); border-radius:var(--r-lg);
+    background:var(--card); padding:12px 14px; margin-bottom:12px;
+  }
+  .ovhead .big { font-size:15px; font-weight:650; color:var(--ink); }
+  .ovhead .sub { font-size:11.5px; color:var(--muted); margin-top:3px; }
+  .ovstats { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
+  .ovstat { font-size:11px; color:var(--muted); }
+  .ovstat b { color:var(--ink); font-size:14px; font-weight:650; margin-right:3px; }
+  .ovbar { height:6px; border-radius:99px; background:var(--line); overflow:hidden; margin-top:11px; }
+  .ovbar > i { display:block; height:100%; background:var(--accent); border-radius:99px;
+               transition:width .35s var(--ease); }
+  .ovsect { font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.4px;
+            margin:14px 0 8px; text-transform:uppercase; }
+  .ovgrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .ovcard {
+    border:1px solid var(--line); border-radius:10px; background:var(--card);
+    padding:9px 10px; min-width:0;
+  }
+  .ovcard .nm { font-size:12px; font-weight:600; color:var(--ink);
+                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ovcard .ag { font-size:10.5px; color:var(--muted); margin-top:2px;
+                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ovst { display:inline-block; font-size:10px; padding:1px 7px; border-radius:99px; margin-top:7px; }
+  .ovst.running { background:var(--accent-soft); color:var(--accent); }
+  .ovst.done { background:var(--ok-soft); color:var(--ok); }
+  .ovst.failed { background:var(--danger-soft); color:var(--danger); }
+  .ovst.waiting { background:var(--code); color:var(--muted); }
+  .ovrow { display:flex; align-items:center; gap:8px; padding:6px 0;
+           border-bottom:1px solid var(--line); font-size:11.5px; color:var(--ink-2); }
+  .ovrow:last-child { border-bottom:0; }
+  .ovrow .dot { width:7px; height:7px; border-radius:50%; background:var(--muted); flex:0 0 auto; }
+  .ovrow .dot.running { background:var(--accent); }
+  .ovrow .dot.done { background:var(--ok); }
+  .ovrow .dot.failed { background:var(--danger); }
+  .ovrow .tx { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ovrow .tm { font-size:10px; color:var(--muted); }
+
+  /* ══ 能力降级提示条 ══ */
+  #degradeBar:empty { display:none; }
+  .degrade {
+    display:flex; gap:8px; align-items:flex-start;
+    border:1px solid var(--line-strong); border-radius:10px;
+    background:var(--warn-soft); color:var(--ink-2);
+    padding:9px 10px; margin-bottom:10px; font-size:11.5px; line-height:1.55;
+  }
+  .degrade .ic { color:var(--warn); font-weight:800; flex:0 0 auto; }
+  .degrade .tx { flex:1; min-width:0; }
+  .degrade b { color:var(--ink); }
+  .degrade .ac { display:block; font-size:10.5px; color:var(--muted); margin-top:3px; }
+  .degrade button { border:0; background:transparent; color:var(--muted);
+                    cursor:pointer; font-size:15px; line-height:1; padding:0 2px; }
+  .degrade button:hover { color:var(--ink); }
+  .empty {
+    color:var(--muted);
+    font-size:12.5px;
+    text-align:center;
+    padding:20px 12px;
+    /* 浅灰底、无边框。
+       以前是「1px 虚线框」—— 空状态本该是最轻的一层，
+       虚线框把它画成了一个「待填的表单」，显得刺眼又占地方。 */
+    background:var(--panel);
+    border:0;
+    border-radius:var(--r);
+  }
+
+  /* Step 卡 */
+  .step {
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--r);
+    padding:10px 12px;
+    margin-bottom:8px;
+    position:relative;
+  }
+  .step .t { display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; }
+  .step .t:hover .tool { color:var(--accent); }
+  .step .t::after {
+    content:"▾"; margin-left:auto; color:var(--muted); font-size:10px;
+    transition:transform .18s ease;
+  }
+  .step.clps .t::after { transform:rotate(-90deg); }
+  .step.clps .a, .step.clps .r { display:none; }
+  /* 生命周期 hook 上报的耗时尾标：紧贴右侧箭头，不抢 badge 的位置 */
+  .step .spent {
+    font-family:var(--font-mono);
+    font-size:11px;
+    color:var(--muted);
+    margin-left:auto;
+    padding:0 2px;
+    white-space:nowrap;
+  }
+  .step .spent:empty { display:none; }
+  .step .tool {
+    font-family:var(--font-mono);
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:.2px;
+  }
+  /* 失败分类徽章：E1-E5。挂在工具名后面，一眼看出「这是哪类失败」。
+     字体用等宽 —— 分类代码是标识符，不是正文。 */
+  .step .ecls {
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    font-weight:600;
+    line-height:1;
+    padding:3px 6px;
+    border-radius:999px;
+    color:var(--danger);
+    background:color-mix(in srgb, var(--danger) 12%, transparent);
+    border:1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+    cursor:help;
+    flex:none;
+  }
+  .step .a {
+    color:var(--muted);
+    font-size:11.5px;
+    word-break:break-all;
+    font-family:var(--font-mono);
+    line-height:1.55;
+    margin-top:6px;
+    padding:6px 8px;
+    background:var(--code);
+    border-radius:6px;
+  }
+  .step .r {
+    margin-top:6px;
+    color:var(--ink-2);
+    font-size:12px;
+    max-height:130px;
+    overflow:auto;
+    white-space:pre-wrap;
+    line-height:1.6;
+    padding:2px 0 0;
+  }
+  /* 只读自证徽章的落位：跟在结果正文下面，空的时候不占位 */
+  .step .proof { margin-top:6px; }
+  .step .proof:empty { display:none; }
+  .step .proof .badge { text-transform:none; }
+  .badge {
+    font-size:10px; font-weight:600;
+    padding:1px 8px;
+    border-radius:999px;
+    border:1px solid var(--line);
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:.5px;
+    white-space:nowrap;
+    background:transparent;
+  }
+  .badge.L0 { color:var(--ok); background:var(--ok-soft); border-color:transparent; }
+  .badge.L1 { color:var(--ink-2); background:var(--panel-2); border-color:transparent; }
+  .badge.L2 { color:var(--warn); background:var(--warn-soft); border-color:transparent; }
+  .badge.L3 { color:var(--danger); background:var(--danger-soft); border-color:transparent; }
+  .badge.done { color:var(--ok); background:var(--ok-soft); border-color:transparent; }
+  .badge.failed,.badge.denied { color:var(--danger); background:var(--danger-soft); border-color:transparent; }
+  .badge.run { color:var(--accent); background:var(--accent-soft); border-color:transparent; }
+  /* 只读徽章：模板只读是从子 Agent 工具白名单算出来的，不是用户标的 */
+  .badge.ro { color:var(--ok); background:var(--ok-soft); border-color:transparent; text-transform:none; }
+
+  .todo {
+    display:flex; gap:10px; align-items:flex-start;
+    font-size:13px;
+    padding:9px 10px;
+    border-radius:var(--r);
+    margin-bottom:4px;
+    background:var(--card);
+    border:1px solid var(--line);
+  }
+  .todo .mk {
+    flex:0 0 18px;
+    color:var(--muted);
+    font-family:var(--font-mono);
+    font-size:13px;
+    line-height:1.4;
+  }
+  .todo.done .tx { color:var(--muted); text-decoration:line-through; }
+  /* 进行中的待办 —— 状态值是 `in_progress`，**不是** `run`。
+     以前这里写的是 `.todo.run`，而 JS 拼的 class 是 `todo in_progress`
+     —— 所以这个样式**从来没生效过**，进行中的待办看着和平的一样。 */
+  .todo.in_progress { border-color:var(--accent-line); background:var(--accent-soft); }
+  .todo.in_progress .tx { color:var(--accent); font-weight:600; }
+  .todo.in_progress .mk { color:var(--accent); }
+  /* 旧名保留 —— 老会话里可能存着 `run` 状态 */
+  .todo.run { border-color:var(--accent-line); background:var(--accent-soft); }
+  .todo.run .tx { color:var(--accent); font-weight:600; }
+  .todo.run .mk { color:var(--accent); }
+  /* 可点击的待办：给出「能点」的视觉暗示 */
+  .todo.todo-click { cursor:pointer; transition:border-color .15s, background .15s; }
+  .todo.todo-click:hover { border-color:var(--accent-line); background:var(--accent-soft); }
+  .todo.todo-click:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+
+  #termOut {
+    background:var(--code);
+    border:1px solid var(--line);
+    border-radius:var(--r);
+    padding:12px;
+    min-height:160px; max-height:min(46vh, 420px);
+    overflow:auto;
+    font:12px/1.6 var(--font-mono);
+    color:var(--ink-2);
+    white-space:pre-wrap;
+    word-break:break-word;
+  }
+  /* 输入框独占一行，按钮跟随；栏一窄就自动换行，不会把「中断」挤出容器 */
+  .trow { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center; }
+  .trow input {
+    flex:1 1 160px; min-width:0;
+    background:var(--bg-2);
+    border:1px solid var(--line);
+    border-radius:var(--r);
+    padding:7px 10px;
+    font:12px var(--font-mono);
+    outline:none;
+    color:var(--ink);
+  }
+  .trow input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  .trow .btn { flex:0 0 auto; }
+  .artifact {
+    display:grid;
+    grid-template-columns:auto 1fr;
+    gap:4px 8px;
+    padding:10px 12px;
+    margin-bottom:6px;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--r);
+    font-size:12px;
+    align-items:start;
+    transition:border-color .18s ease, background .18s ease;
+  }
+  .artifact:hover { border-color:var(--accent); background:var(--accent-soft); }
+  .artifact .p {
+    color:var(--ink-2);
+    font-family:var(--font-mono);
+    font-size:11.5px;
+    word-break:break-all;
+    min-width:0;
+  }
+  /* 产物操作按钮：默认收起来，悬停时露出来 —— 保持面板干净，
+     但需要时一眼就能点到。 */
+  .artifact .acts {
+    grid-column:1 / -1;
+    display:flex;
+    gap:4px;
+    flex-wrap:wrap;
+    margin-top:2px;
+    opacity:0;
+    transition:opacity .18s ease;
+  }
+  .artifact:hover .acts, .artifact:focus-within .acts { opacity:1; }
+  .mini {
+    font-size:11px;
+    line-height:1.5;
+    padding:2px 8px;
+    border:1px solid var(--line);
+    border-radius:var(--r);
+    background:var(--card);
+    color:var(--ink-2);
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .mini:hover { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+  .mini:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+

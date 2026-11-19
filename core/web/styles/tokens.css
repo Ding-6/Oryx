@@ -1,0 +1,186 @@
+/* 设计 token：颜色、字号、圆角、阴影（明暗两套）
+   —— 从 `main.css` 按原顺序切出。层叠顺序与拆分前完全一致。 */
+
+
+  :root {
+    /* ── Oryx console — neutral + indigo ────────────────── */
+    --bg:        #F6F6F8;
+    --bg-2:      #FFFFFF;
+    --panel:     #EFEFF1;
+    --panel-2:   #E5E5E9;
+    --card:      #FFFFFF;
+    --line:      #E3E3E8;
+    --line-strong:#D2D2D9;
+    --rule:      #E3E3E8;
+
+    --ink:       #17171B;
+    --ink-2:     #4C4C55;
+    /* --muted 从 #8B8B95 调深到 #6B6B75 ——
+       原来的值在页面底上只有 2.94:1，在面板底上 2.69:1，
+       全站 77 处小字（计数徽章、目录名、说明、日期、占位符…）
+       达不到 WCAG AA 的 4.5:1 —— 看着「有点淡」但说不清淡在哪。
+       现在的值在页面底 4.59:1、卡片底 4.88:1。 */
+    --muted:     #6B6B75;
+
+    --accent:    #4F46E5;
+    --accent-soft:#EEF0FD;
+    --accent-line:#C9CDF7;
+    /* 主色上的前景色 —— 单独一个变量，换主色时不会忘了改按钮上的字色 */
+    --on-accent: #FFFFFF;
+
+    --ok:        #16A34A;
+    --ok-soft:   #E5F5EB;
+    --warn:      #C77414;
+    --warn-soft: #FAEFDB;
+    --danger:    #DC2626;
+    --danger-soft:#FBEAEA;
+
+    --user-bg:   #ECECF0;
+    --user-fg:   #17171B;
+    --user-av:   #D9D9DF;
+    --bot-av:    #17171B;
+    --bot-fg:    #FFFFFF;
+    --code:      #F1F1F4;
+    --result:    #4C4C55;
+
+    --shadow:    0 1px 2px rgba(18,18,23,.05);
+    --shadow-md: 0 2px 10px rgba(18,18,23,.07);
+    --shadow-lg: 0 16px 40px -12px rgba(18,18,23,.20);
+    --r:    8px;
+    --r-lg: 12px;
+
+    --bg-image:  none;
+    --bg-overlay:rgba(246,246,248,.92);
+    --grain-opacity:0;
+
+    --font-display: "Inter Tight", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --font-body:    "Inter Tight", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --font-mono:    "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  [data-theme="dark"] {
+    --bg:        #0B0B0D;
+    --bg-2:      #101014;
+    --panel:     #0F0F13;
+    --panel-2:   #1B1B21;
+    --card:      #141419;
+    --line:      #232329;
+    --line-strong:#33333B;
+    --rule:      #232329;
+
+    --ink:       #EDEDF0;
+    --ink-2:     #B5B5BD;
+    /* 暗色下反过来要**调亮**：#74747E 在卡片底上只有 3.97:1。
+       暗色主题里「次要文字太暗」是最常见的可读性问题 ——
+       屏幕上看着还行，实际读起来费劲。现在页面底 5.24:1、卡片底 4.89:1。 */
+    --muted:     #83838D;
+
+    --accent:    #818CF8;
+    --accent-soft:#1C1F3A;
+    --accent-line:#3B4066;
+    --on-accent: #0B0B0D;
+
+    --ok:        #4ADE80;
+    --ok-soft:   #12261B;
+    --warn:      #FBBF24;
+    --warn-soft: #292010;
+    --danger:    #F87171;
+    --danger-soft:#2C1515;
+
+    --user-bg:   #232329;
+    --user-fg:   #EDEDF0;
+    --user-av:   #33333B;
+    --bot-av:    #EDEDF0;
+    --bot-fg:    #17171B;
+    --code:      #1B1B21;
+    --result:    #B5B5BD;
+
+    --shadow:    none;
+    --shadow-md: 0 2px 10px rgba(0,0,0,.4);
+    --shadow-lg: 0 18px 44px rgba(0,0,0,.55);
+    --bg-overlay:rgba(11,11,13,.88);
+  }
+  :root, [data-theme="dark"] {
+    --text: var(--ink);
+    --text-2: var(--ink-2);
+  }
+
+  /* ══════════ 设计 token ══════════
+     这个文件 8000+ 行，以前字号有 23 种、间距有 15 种，
+     大多是 11.5 / 12.5 / gap:7 这种「差一点」的孤立值 ——
+     屏幕像素密度下那点差别根本看不出来，只增加了维护成本。
+
+     现在收敛成一套：字号 5 级、间距 6 级、动效 3 档。
+     后面新增样式一律用 token，不要再写裸 px。 */
+  :root {
+    /* 字号：角标 / 密集辅助 / 正文次级 / 正文 / 小标题 */
+    --fs-xs:10px;      /* 徽章、角标 */
+    --fs-sm:11.5px;    /* 密集辅助信息、路径、标签 */
+    --fs-md:12.5px;    /* 正文次级、表格、说明 */
+    --fs-base:13.5px;  /* 正文基准 */
+    --fs-lg:15px;      /* 小标题、按钮文字 */
+    --fs-xl:17px;      /* 页面标题 */
+    --fs-2xl:22px;     /* 设置页大标题 */
+    --fs-num:26px;     /* 统计大数字 */
+
+    /* 间距：4 的倍数为主，2 用于贴边 */
+    --sp-1:4px;
+    --sp-2:8px;
+    --sp-3:12px;
+    --sp-4:16px;
+    --sp-5:24px;
+    --sp-6:32px;
+
+    /* 动效：入场 2 档、循环 1 档。
+       以前 rise 有 .16/.22/.4/.5 四种时长，循环动画有 1.1/1.15/1.4 三种 ——
+       用户会感到「有的闪得快有的慢」。 */
+    --dur-fast:.18s;
+    --dur-base:.28s;
+    --dur-slow:.45s;
+    --ease:cubic-bezier(.2,.6,.2,1);
+    --dur-loop:1.1s;
+
+    /* 分区标题与卡片标题：以前没定义字号，
+       继承 13.5px 正文 —— 分节标题和正文一样大，层级完全塌掉。 */
+    --fs-h2:15px;
+    --fs-h3:13.5px;
+  }
+
+  * { box-sizing:border-box; }
+  html,body { height:100%; margin:0; }
+  /* 键盘焦点环：统一走 :focus-visible，鼠标点击不冒出来。
+     输入框另有 .inp:focus 的边框+光晕，这里只兜底非输入控件。 */
+  :where(button, a, [tabindex], summary, .navitem, .sess, .iconbtn, .tbtn, .rz, .attchip .rm):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--r);
+  }
+  /* .inp / .search / .cbox 用 border+box-shadow 做焦点态，会和 outline 叠成双环 */
+  .inp:focus-visible, .search:focus-within, .cbox:focus-within { outline: none; }
+  body {
+    color:var(--ink); display:flex; overflow:hidden;
+    font-family:var(--font-body);
+    font-size:13.5px;
+    line-height:1.62;
+    background-color:var(--bg);
+    -webkit-font-smoothing:antialiased;
+  }
+  /* 背景图独立成层：fixed inset:0 保证铺满整个窗口，
+     不受 rail / center / side / page 各自背景色的挤压。 */
+  #bgLayer {
+    position:fixed; inset:0; z-index:0;
+    background-image:var(--bg-image);
+    background-size:var(--bg-size,cover);
+    background-position:var(--bg-pos,center);
+    background-repeat:var(--bg-repeat,no-repeat);
+    pointer-events:none;
+  }
+  button,input,textarea,select { font:inherit; color:inherit; }
+  ::selection { background:var(--accent-soft); color:var(--accent); }
+  #app { position:relative; z-index:1; display:flex; width:100%; height:100%; }
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb { background:var(--line-strong); border-radius:8px; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--muted); }
+  ::-webkit-scrollbar-track { background:transparent; }
+
+  .num { font-weight:600; color:var(--muted); }
+

@@ -1,0 +1,25 @@
+{
+  "default": "",
+  "profiles": {
+    "minimal": {
+      "description": "最少的一组 —— 只保留文件检索。上下文占用最小。",
+      "extensions": ["file-search"]
+    },
+    "research": {
+      "description": "调研相关 —— 联网调研 + 文件检索。",
+      "extensions": ["web-research", "file-search", "word-count"]
+    },
+    "developer": {
+      "description": "开发者日常 —— 基础组 + 文件整理 + 票据识别。",
+      "includes": ["minimal"],
+      "extensions": ["file-organizer", "receipt-ocr", "system-info", "word-count"]
+    },
+    "full": {
+      "description": "全部 —— 显式列出所有扩展，方便审计。",
+      "extensions": [
+        "file-search", "file-organizer", "receipt-ocr",
+        "system-info", "web-research", "word-count"
+      ]
+    }
+  }
+}

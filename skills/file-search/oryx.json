@@ -1,0 +1,17 @@
+{
+  "apiVersion": "oryx/v1",
+  "kind": "skill",
+  "id": "file-search",
+  "version": "1.0.0",
+  "displayName": "文件检索",
+  "description": "按文件名或文件内容在指定目录中查找文件，用于「记不住文件名但记得内容」的场景。",
+  "triggers": ["找文件", "搜索文件", "在哪个文件", "记得内容", "查找"],
+  "eager": false,
+  "allowedTools": ["index_search", "index_scan", "fs_glob", "fs_grep"],
+  "caps": ["fs.read"],
+  "contracts": {
+    "gates": ["给出完整绝对路径", "说明用的是文件名匹配还是内容检索"],
+    "fail_closed_when": ["索引未建立且用户不允许扫描"],
+    "handoffs": []
+  }
+}

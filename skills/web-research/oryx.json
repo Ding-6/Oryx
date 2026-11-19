@@ -1,0 +1,17 @@
+{
+  "apiVersion": "oryx/v1",
+  "kind": "skill",
+  "id": "web-research",
+  "version": "1.1.0",
+  "displayName": "联网调研",
+  "description": "用浏览器打开网页、翻页、抓取结构化数据，回答需要联网查证的问题。",
+  "triggers": ["联网", "查一下", "上网", "调研", "research", "搜一下"],
+  "eager": false,
+  "allowedTools": ["browser_open", "browser_extract", "read_file"],
+  "caps": ["net.egress", "net.fetch", "browser.provider"],
+  "contracts": {
+    "gates": ["至少两个独立来源交叉验证", "每条结论附 URL 与访问日期"],
+    "fail_closed_when": ["全部来源不可访问", "只有单一来源且无法交叉验证"],
+    "handoffs": ["doc-writer"]
+  }
+}

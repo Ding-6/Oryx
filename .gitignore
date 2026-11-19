@@ -1,0 +1,37 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+node_modules/
+dist/
+target/
+!apps/desktop/dist/
+!apps/desktop/dist/index.html
+*.db
+*.db-wal
+*.db-shm
+.tmp/
+
+# Tauri / Rust
+apps/desktop/src-tauri/target/
+apps/desktop/dist/*.map
+
+# 临时文件（服务日志、调试残留）
+.tmp-*
+.tmp/
+
+# 本地个人配置
+.claude/settings.local.json
+
+# 审计报告产物（可重新生成）
+audit-reports/*.html
+
+# 数据目录（运行时生成，体积大）
+# 实际数据在仓库外的 D:/OryxData —— gitignore 只认相对路径，
+# 但如果以后把数据目录挪进仓库，用这两条兜住。
+data/
+*.db
+*.db-wal
+*.db-shm

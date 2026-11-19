@@ -1,0 +1,26 @@
+# Oryx 中继入口配置
+# 把 ORYX_DOMAIN 换成你的域名，DNS 指向本机后执行 docker compose up -d
+# Caddy 会自动申请并续期 Let's Encrypt 证书
+
+{$ORYX_DOMAIN:relay.example.com} {
+	encode zstd gzip
+
+	# 探活接口：curl https://你的域名/health
+	handle /health {
+		reverse_proxy relay:8899
+	}
+
+	# WebSocket 升级 + 普通请求都转发给中继
+	reverse_proxy relay:8899 {
+		# 画面帧较大，放宽读超时
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

@@ -1,0 +1,29 @@
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    environment:
+      - PORT=8899
+    expose:
+      - "8899"
+    # 只在内网暴露，公网入口交给 caddy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      # 换成你自己的域名；DNS 需要先解析到这台机器
+      - ORYX_DOMAIN=${ORYX_DOMAIN:-relay.example.com}
+    depends_on:
+      - relay
+
+volumes:
+  caddy_data:
+  caddy_config:

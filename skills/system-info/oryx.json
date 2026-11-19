@@ -1,0 +1,17 @@
+{
+  "apiVersion": "oryx/v1",
+  "kind": "skill",
+  "id": "system-info",
+  "version": "1.0.0",
+  "displayName": "系统信息",
+  "description": "读取本机硬件与系统状态，回答「我的电脑配置够不够」「C盘还剩多少」这类问题。",
+  "triggers": ["电脑配置", "系统信息", "硬件", "C盘", "还剩多少", "磁盘空间"],
+  "eager": false,
+  "allowedTools": ["system_info", "fs_list"],
+  "caps": ["fs.read"],
+  "contracts": {
+    "gates": ["给出具体数值而非「较多」这类描述", "涉及磁盘空间时给出绝对路径"],
+    "fail_closed_when": ["关键指标读取失败"],
+    "handoffs": []
+  }
+}

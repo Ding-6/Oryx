@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Oryx</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234F46E5'/%3E%3Cstop offset='1' stop-color='%237C83F8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='48' height='48' rx='11' fill='url(%23g)'/%3E%3Ccircle cx='24' cy='27' r='10.5' fill='none' stroke='%23fff' stroke-width='4.6'/%3E%3Cpath d='M18.8 15.8 17.2 3.8M29.2 15.8 30.8 3.8' stroke='%23fff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/web/styles/tokens.css">
+<link rel="stylesheet" href="/web/styles/rail.css">
+<link rel="stylesheet" href="/web/styles/center.css">
+<link rel="stylesheet" href="/web/styles/side.css">
+<link rel="stylesheet" href="/web/styles/panels.css">
+<link rel="stylesheet" href="/web/styles/motion.css">
+<link rel="stylesheet" href="/web/styles/overlays.css">
+<link rel="stylesheet" href="/web/styles/composer.css">
+</head>
+<body>
+<div id="bgLayer"></div>
+<div id="app">
+  <!-- ══ 左栏 ══ -->
+  <aside id="rail">
+   <div class="railcard">
+    <div class="railhead">
+      <div class="logo">
+        <span>Ory<em>x</em></span>
+        <span class="tag">本地 Agent</span>
+        <span class="live" id="live"></span>
+      </div>
+      <div class="search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="search" type="search" placeholder="搜索会话、技能、工具…" aria-label="搜索会话、技能与工具" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="searchBox" aria-autocomplete="list" />
+      </div>
+      <div class="railbox"></div>
+    </div>
+
+    <div class="railnav">
+    <div class="nav" role="tablist" aria-label="主导航">
+      <div class="navitem newchat" role="button" tabindex="0" data-view="chat" aria-selected="true"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4 20l1.8-4.6A7.5 7.5 0 1 1 20 11.5z"/></svg>新建对话</div>
+      <div class="navitem" role="tab" tabindex="0" aria-selected="false" data-view="work"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>工作台</div>
+      <div class="navitem" role="tab" tabindex="0" aria-selected="false" data-view="market"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 1 5.4-5.4z"/></svg>技能广场</div>
+      <div class="navitem" role="tab" tabindex="0" aria-selected="false" data-view="automations"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>自动任务<span class="cnt" id="autoCnt"></span></div>
+      <div class="navitem" role="tab" tabindex="0" aria-selected="false" data-view="workflows"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.5"/><circle cx="18" cy="5" r="2.5"/><circle cx="12" cy="19" r="2.5"/><path d="M6 7.5v2a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v1M18 7.5v2a3 3 0 0 1-3 3H9a3 3 0 0 0-3 3v1"/></svg>工作流<span class="cnt" id="wfCnt"></span></div>
+      <div class="navitem" role="tab" tabindex="0" aria-selected="false" data-view="butlers"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="18.5" cy="7" r="2.2"/><path d="M16.5 12.6a4.6 4.6 0 0 1 3.2 4.4"/></svg>管家团队</div>
+      <div class="navitem" role="tab" tabindex="0" aria-selected="false" data-view="persona"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>人设管理</div>
+      <div class="navgroup">
+        <div class="navitem localhead" role="button" tabindex="0" aria-expanded="false" aria-controls="localSub"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="lbl">本地资料</span><span class="caret" aria-hidden="true">›</span></div>
+        <div class="subnav" id="localSub" role="group" aria-label="本地资料分类">
+          <div class="subitem on" role="button" tabindex="0" data-lv="kb"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>知识库</div>
+          <div class="subitem" role="button" tabindex="0" data-lv="img"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 15l-5-5L5 20"/></svg>图片库</div>
+          <div class="subitem" role="button" tabindex="0" data-lv="apps"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>应用库</div>
+          <div class="subitem" role="button" tabindex="0" data-lv="pc"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>此电脑</div>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div class="railgroup">
+      <div class="gt">对话<span class="tw" id="sessCnt"></span></div>
+      <div id="sessList"><div class="empty">还没有对话</div></div>
+    </div>
+
+    <div class="railfoot">
+      <div class="av">OX</div>
+      <div class="who"><div class="nm">Oryx</div></div>
+      <div class="act">
+        <button class="iconbtn" id="railCollapse" title="收起左栏" aria-label="收起左栏" aria-controls="rail" aria-expanded="true" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M14 6l-6 6 6 6"/></svg></button>
+        <button class="iconbtn" id="dashBtn" title="用量面板" aria-label="打开用量面板" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></button>
+        <button class="iconbtn" id="setBtn" title="设置" aria-label="打开设置" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg></button>
+      </div>
+    </div>
+   </div>
+    <div class="rz" id="railRz" title="拖动调整宽度，或用左右方向键" role="separator" aria-orientation="vertical" aria-label="调整左栏宽度" tabindex="0" aria-valuemin="168" aria-valuemax="400" aria-valuenow="188"></div>
+  </aside>
+  <button class="rztab" id="railToggle" style="display:none" title="展开左栏" aria-label="展开左栏" aria-controls="rail" aria-expanded="false" type="button">
+    <svg viewBox="0 0 24 24"><path d="M10 6l6 6-6 6"/></svg>
+  </button>
+
+  <!-- ══ 主区 ══ -->
+  <section id="center">
+    <div class="topbar">
+      <h1 id="pageTitle">新对话</h1>
+      <span class="sub" id="pageSub"></span>
+      <div class="spacer"></div>
+      <button class="tbtn" id="teamBtn" title="多 Agent 团队" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9" r="2.4"/><path d="M14.5 19a4.6 4.6 0 0 1 6-4"/></svg><span>团队</span></button>
+      <div class="seg" id="interSeg">
+        <button data-i="ask" type="button">问答</button><button data-i="plan" type="button">规划</button><button data-i="craft" class="on" type="button">执行</button>
+      </div>
+      <select class="btn" id="expertSel" title="人设 / 场景角色" aria-label="选择人设或场景角色"><option value="">无专家</option></select>
+      <select class="btn" id="styleSel" title="回答风格" aria-label="选择回答风格"><option value="professional">专业</option></select>
+      <select class="btn" id="modeSel" title="计算模式" aria-label="选择计算模式"><option value="efficiency">效率</option><option value="local">本地</option></select>
+      <button class="chip modelpick" id="modelChip" title="切换模型服务" type="button">—</button>
+      <!-- 窄屏时上面几个选择器会被隐藏（放不下），这个按钮是它们的替代入口。
+           没有它的话，窄屏用户**根本没法切换模式/风格/人设/模型**。 -->
+      <button class="tbtn topfitonly" id="topMoreBtn" title="更多设置（模式 / 风格 / 人设 / 模型）" aria-label="更多设置" type="button">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+
+    <div id="scroll"><div class="wrap" id="messages"></div></div>
+
+    <div id="composer">
+      <div class="attbar" id="attbar"></div>
+      <div class="modehint" id="modeHint"></div>
+      <div class="cbox">
+        <textarea id="input" placeholder="请输入任务，交给我来帮我完成（Enter 发送，Shift+Enter 换行）" aria-label="任务输入框，输入要交给 Oryx 完成的事"></textarea>
+        <div class="crow">
+          <div class="chipsbar" id="chipsBar">
+            <button class="tbtn" id="optBtn" title="优化这句表达" aria-label="优化这句表达" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span>优化</span></button>
+            <button class="tbtn" id="fileBtn" title="选择要交给 Oryx 的文件" aria-label="选择要交给 Oryx 的文件" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>选择文件</span></button>
+            <button class="tbtn" id="pasteBtn" title="粘贴导入：截图、文本、文件" aria-label="粘贴导入内容" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4h6v3H9z"/><path d="M9 11h6M9 15h4"/></svg><span>粘贴导入</span></button>
+            <button class="tbtn" id="permBtn" title="设置本轮默认权限" aria-label="设置本轮默认权限" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg><span>默认权限</span></button>
+            <button class="tbtn" id="skillBtn" title="为这一轮绑定技能" aria-label="为这一轮绑定技能" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h14v5H5zM5 13h9v7H5zM17 13h2v7h-2z"/></svg><span>调用技能</span></button>
+          </div>
+          <button class="chiptoggle" id="chipToggle" title="折叠/展开" aria-label="折叠或展开工具芯片" aria-expanded="true" aria-controls="chipsBar" type="button">
+            <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            <span>收起</span>
+          </button>
+          <div class="spacer"></div>
+          <button class="sendbtn" id="sendBtn" title="发送" aria-label="发送任务" type="button">
+            <svg id="sendIcon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="disclaimer">以上内容由 AI 生成，重要操作会先请你确认</div>
+    </div>
+  </section>
+
+  <!-- ══ 右栏 ══ -->
+  <aside id="side">
+    <div class="stabs">
+      <button data-p="overview" type="button" title="多 Agent / 工作流一屏总览">总览</button>
+      <button data-p="steps" class="on" type="button">执行</button>
+      <button data-p="todos" type="button">任务</button>
+      <button data-p="team" type="button">团队</button>
+      <button data-p="term" type="button">终端</button>
+      <button data-p="files" type="button">产物</button>
+      <button data-p="detail" type="button">详情</button>
+      <button class="stcollapse" id="sideCollapse" title="收起右栏" aria-label="收起右栏" aria-controls="side" aria-expanded="true" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 6l6 6-6 6"/></svg></button>
+    </div>
+    <div class="sbody">
+      <!-- 能力降级提示：向量检索退回关键词 / OCR 引擎缺失等，
+           以前都是静默发生，用户以为自己在用完整能力 -->
+      <div id="degradeBar"></div>
+      <div class="pane" id="p-overview"><div class="empty">还没有并行任务<br><span style="font-size:11.5px;opacity:.7">跑工作流、组队派活或执行多步任务时，这里会显示一屏总览</span></div></div>
+      <div class="pane on" id="p-steps"><div class="empty">还没有执行记录</div></div>
+      <div class="pane" id="p-todos"><div class="empty">没有待办</div></div>
+      <div class="pane" id="p-team"><div class="empty">还没有团队</div></div>
+      <div class="pane" id="p-term">
+        <!-- 空状态引导：以前这个面板进来是一片空白，
+             用户不知道能在这里干什么、也不知道输出会出现在哪。 -->
+        <div class="empty" id="termEmpty">终端面板<br><span style="font-size:11.5px;opacity:.7">在上面输入命令，回车执行；输出会显示在这里</span></div>
+        <div id="termOut"></div>
+        <div class="trow"><input id="termInput" placeholder="命令，回车执行" aria-label="终端命令输入" /><button class="btn" id="termRun" type="button">执行</button><button class="btn" id="termKill" type="button">中断</button></div>
+      </div>
+      <div class="pane" id="p-files"><div class="empty">还没有产物</div></div>
+      <div class="pane" id="p-detail"><div class="empty">打开一个会话后这里显示用量与审计</div></div>
+    </div>
+    <div class="rz" id="sideRz" title="拖动调整宽度，或用左右方向键" role="separator" aria-orientation="vertical" aria-label="调整右栏宽度" tabindex="0" aria-valuemin="200" aria-valuemax="540" aria-valuenow="224"></div>
+  </aside>
+  <button class="rztab" id="sideToggle" style="display:none" title="展开右栏" aria-label="展开右栏" aria-controls="side" aria-expanded="false" type="button">
+    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M14 6l-6 6 6 6"/></svg>
+  </button>
+
+  <section id="page"></section>
+</div>
+
+<div id="notice"></div>
+
+<div class="mask" id="mask"><div class="modal" id="modal"></div></div>
+
+<script type="module" src="/web/modules/boot.js"></script>
+</body>
+</html>

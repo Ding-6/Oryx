@@ -1,0 +1,25 @@
+{
+  "apiVersion": "oryx/v1",
+  "kind": "tool",
+  "id": "word-count",
+  "version": "1.0.0",
+  "displayName": "字数统计",
+  "description": "统计文本的字数、字符数、行数。",
+  "caps": ["fs.read"],
+  "tools": [
+    {
+      "name": "text_count",
+      "description": "统计一段文本的字数、字符数与行数。用于回答「这段有多少字」这类问题。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {"type": "string", "description": "要统计的文本"},
+          "file": {"type": "string", "description": "要统计的文件路径（与 text 二选一）"}
+        },
+        "required": []
+      },
+      "risk": "L0_READ",
+      "entry": "tools.py:count_text"
+    }
+  ]
+}

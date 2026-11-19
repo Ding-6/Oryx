@@ -1,0 +1,329 @@
+# Oryx 前端质量规则
+#
+# 这批规则扫的是**自己的界面代码**（core/web/），
+# 用来防「AI 生成的界面能跑但很糙」这类问题。
+#
+# 来源（本地项目里可复用的规则集）：
+#   · taste-lint                 —— 149 条 YAML 规则，schema 与本文件同构
+#   · web-interface-guidelines   —— 104 条界面规范（README + command.md）
+#   · interface-proof            —— 14 类静态检查 + 扣分模型
+#   · Frontend-Quality           —— 7 类规则（响应式 / 可访问性 / 四态 / 性能）
+#   · hallmark                   —— 反「AI 味」的判据
+#   · argus / impeccable         —— 设计令牌与一致性预算
+#
+# 分类：
+#   A11Y   —— 可访问性（屏幕阅读器、键盘、焦点）
+#   PERF   —— 性能（渲染阻塞、CLS、字体）
+#   MOTION —— 动效（时长、缓动、reduced-motion）
+#   TYPO   —— 排版（字号下限、行高、字距）
+#   TOKEN  —— 设计令牌（硬编码颜色/尺寸）
+#   SEM    —— 语义与结构
+#   I18N   —— 国际化（RTL、硬编码格式）
+#   COPY   —— 文案
+#
+# severity：
+#   block —— 阻断（明确的问题，必须改）
+#   warn  —— 警告（多数情况下该改）
+#   info  —— 提示（风格建议）
+#
+# **写正则时的约定**：pattern 里不要直接写引号字符。
+# 用 \x22 表示双引号、\x27 表示单引号 —— 否则 YAML 与正则两重转义会打架
+# （单引号串里的 \x27 会被 YAML 先吃掉，正则就变成「匹配字面量 \x27」）。
+#
+# 匹配范围由 scope 决定：css / html / js / all。
+# pattern 是 Python 正则（re.search）。
+
+rules:
+  # ── A11Y：可访问性 ─────────────────────────────────────────────
+  - id: A11Y-001
+    category: A11Y
+    severity: block
+    description: 禁止 outline:none 而不给替代的焦点样式
+    pattern: "outline\\s*:\\s*(?:none|0)\\b"
+    scope: css
+    requires_absent: ":focus-visible"
+    hint: 改用 :focus-visible，并给足对比度
+
+  - id: A11Y-002
+    category: A11Y
+    severity: warn
+    description: 交互元素（div/span）应当用 button/a，或补 role 与键盘处理
+    pattern: "<(?:div|span)[^>]*\\bonclick\\s*="
+    scope: html
+
+  - id: A11Y-003
+    category: A11Y
+    severity: warn
+    description: 图标按钮必须有可访问名（aria-label / title / 文本）
+    pattern: "<button[^>]*>\\s*<(?:i|svg)[^>]*>\\s*</(?:i|svg)>\\s*</button>"
+    scope: html
+
+  - id: A11Y-004
+    category: A11Y
+    severity: warn
+    description: 输入框应有 label 关联或 aria-label
+    pattern: "<input(?![^>]*\\b(?:aria-label|aria-labelledby|id)\\b)[^>]*type\\s*=\\s*[^>]{0,3}?(?:text|email|password|search|number|url|tel)"
+    scope: html
+
+  - id: A11Y-005
+    category: A11Y
+    severity: warn
+    description: 图片应带 alt 属性（装饰性图片用空 alt）
+    pattern: "<img(?![^>]*\\balt\\s*=)[^>]*>"
+    scope: html
+
+  - id: A11Y-006
+    category: A11Y
+    severity: info
+    description: 动态内容变化应通过 aria-live 通知屏幕阅读器
+    pattern: "\\.(?:toast|notify|snackbar)\\b"
+    scope: js
+    hint: 给容器加 aria-live=polite，让变化被读出来
+
+  - id: A11Y-007
+    category: A11Y
+    severity: warn
+    description: 弹层应支持 Esc 关闭
+    pattern: "\\.showModal\\(\\)|classList\\.add\\(\\x22open\\x22\\)"
+    scope: js
+    hint: 监听 keydown 判断 Escape
+
+  # ── PERF：性能 ──────────────────────────────────────────────────
+  - id: PERF-001
+    category: PERF
+    severity: info
+    description: 渲染过程中读取布局属性会触发强制重排
+    pattern: "\\.(?:getBoundingClientRect|offsetHeight|offsetWidth|offsetTop|scrollTop|scrollHeight)\\b"
+    scope: js
+    exclude: "\\.scrollTop\\s*="
+    hint: 在批量渲染路径里读布局属性会触发重排；先批量读，再批量写
+
+  - id: PERF-002
+    category: PERF
+    severity: warn
+    description: 字体应设 font-display:swap，避免文字不可见期
+    pattern: "@font-face"
+    scope: css
+    hint: 每个 @font-face 加 font-display:swap
+
+  - id: PERF-003
+    category: PERF
+    severity: warn
+    description: 图片应显式给宽高以避免布局偏移
+    pattern: "<img(?![^>]*\\bwidth=)[^>]*>"
+    scope: html
+
+  - id: PERF-004
+    category: PERF
+    severity: warn
+    description: 频繁触发的监听器应考虑节流
+    pattern: "addEventListener\\(\\x22(?:scroll|resize|mousemove|wheel)\\x22"
+    scope: js
+    hint: 用 requestAnimationFrame 或节流包装
+
+  # ── MOTION：动效 ────────────────────────────────────────────────
+  - id: MOTION-001
+    category: MOTION
+    severity: block
+    description: 禁止 transition:all —— 会连同布局属性一起动，很贵
+    pattern: "transition\\s*:\\s*all\\b"
+    scope: css
+    hint: 显式列出要动的属性
+
+  - id: MOTION-002
+    category: MOTION
+    severity: warn
+    description: 过渡时长不宜超过 300ms（400ms 仅限遮罩类）
+    pattern: "transition[^;{}]*\\b(?:[4-9]\\d{2}|[1-9]\\d{3,})ms"
+    scope: css
+    hint: 超过 400ms 用户会明显感到迟滞
+
+  - id: MOTION-003
+    category: MOTION
+    severity: warn
+    description: 动效应提供 prefers-reduced-motion 兜底
+    pattern: "@keyframes|animation\\s*:"
+    scope: css
+    requires_absent: "prefers-reduced-motion"
+    hint: 加 @media (prefers-reduced-motion:reduce) 关掉动画
+
+  - id: MOTION-004
+    category: MOTION
+    severity: warn
+    description: 动画应只动 transform / opacity，避免触发重排
+    pattern: "@keyframes[^{]*\\{[^}]*\\b(?:width|height|top|left|margin|padding)\\s*:"
+    scope: css
+    hint: 改成 transform:translate / scale
+
+  - id: MOTION-005
+    category: MOTION
+    severity: warn
+    description: 避免 ease-in —— 起步慢，观感拖沓
+    pattern: "(?:transition|animation)[^;{}]*\\bease-in(?!-)"
+    scope: css
+    hint: ease-in 起步慢，观感拖沓；ease-in-out 是对称的，不算
+
+  - id: MOTION-006
+    category: MOTION
+    severity: warn
+    description: 避免 linear 缓动 —— 机械感强
+    pattern: "(?:transition|animation)[^;{}]*\\blinear\\b"
+    scope: css
+    exclude: "\\bspin\\b|\\brotate\\b"
+    hint: 用 ease-out 或 cubic-bezier（旋转类动画除外 —— 那些必须匀速）
+
+  # ── TYPO：排版 ──────────────────────────────────────────────────
+  - id: TYPO-001
+    category: TYPO
+    severity: block
+    description: 字号不应小于 9.5px —— 再小基本读不清
+    pattern: "font-size\\s*:\\s*(?:[0-9](?:\\.[0-4])?|9\\.[0-4]?)px"
+    scope: css
+    hint: 中文正文建议 14-16px；辅助文字也别低于 10px
+
+  - id: TYPO-001B
+    category: TYPO
+    severity: info
+    description: 10-11px 属辅助文字范围，确认它承担的不是正文
+    pattern: "font-size\\s*:\\s*1?[01](?:\\.[05])?px"
+    scope: css
+    hint: 时间戳、计数、标签用小字没问题；正文别用
+
+  - id: TYPO-002
+    category: TYPO
+    severity: info
+    description: 行高低于 1.5（确认它承担的不是正文）
+    pattern: "line-height\\s*:\\s*1\\.[0-4]\\d*\\s*;"
+    scope: css
+    hint: 中文正文行高低于 1.5 会显得拥挤；但标签、角标、辅助说明用 1.1-1.4 是正常的
+
+  - id: TYPO-003
+    category: TYPO
+    severity: info
+    description: 正文不应使用负字距（会让中文笔画粘连）
+    pattern: "letter-spacing\\s*:\\s*-"
+    scope: css
+    hint: 负字距只适合大号英文标题；正文用会让中文笔画粘连
+
+  - id: TYPO-004
+    category: TYPO
+    severity: info
+    description: 避免用 justify 拉伸中文正文
+    pattern: "text-align\\s*:\\s*justify"
+    scope: css
+
+  # ── TOKEN：设计令牌 ─────────────────────────────────────────────
+  - id: TOKEN-001
+    category: TOKEN
+    severity: warn
+    description: 颜色应走 CSS 变量，不要硬编码十六进制
+    pattern: "#[0-9a-fA-F]{3,8}\\b"
+    scope: css
+    ignore_var_defs: true
+    exclude: "var\\(\\s*--[\\w-]+\\s*,"
+    hint: 定义成 --color-* 变量，换主题时一处改
+
+  - id: TOKEN-002
+    category: TOKEN
+    severity: info
+    description: 颜色应走变量，不要在 JS 里内联样式硬编码
+    pattern: "(?:color|background)\\s*[:=]\\s*[^\\n]{0,4}#[0-9a-fA-F]{3,8}"
+    scope: js
+
+  - id: TOKEN-003
+    category: TOKEN
+    severity: info
+    description: 圆角应走变量，便于统一调圆角风格
+    pattern: "border-radius\\s*:\\s*\\d+px"
+    scope: css
+    ignore_var_defs: true
+    hint: 定义 --radius-sm/md/lg
+
+  - id: TOKEN-004
+    category: TOKEN
+    severity: info
+    description: 间距应走变量，保证节奏一致
+    pattern: "(?:margin|padding)\\s*:\\s*\\d+px"
+    scope: css
+    ignore_var_defs: true
+    hint: 建议用 4/8 的倍数并走变量
+
+  # ── SEM：语义与结构 ─────────────────────────────────────────────
+  - id: SEM-001
+    category: SEM
+    severity: warn
+    description: 页面应有唯一的 h1
+    pattern: "<h1\\b"
+    scope: html
+    count: 1
+
+  - id: SEM-002
+    category: SEM
+    severity: warn
+    description: 标题层级不应跳级
+    pattern: "<h([1-6])\\b"
+    scope: html
+    heading_order: true
+
+  - id: SEM-003
+    category: SEM
+    severity: info
+    description: 交互元素优先直接用 button/a，而不是 div 加 role
+    pattern: "role\\s*=\\s*\\x22button\\x22"
+    scope: html
+    hint: 用原生标签自带键盘与语义
+
+  # ── I18N：国际化 ────────────────────────────────────────────────
+  - id: I18N-001
+    category: I18N
+    severity: info
+    description: 用了物理方向属性（将来支持 RTL 时要改）
+    pattern: "\\b(?:margin-left|margin-right|padding-left|padding-right|text-left|text-right)\\s*:"
+    scope: css
+    hint: Oryx 当前是纯中文本地应用，没有 RTL 需求；若将来要支持，改用 margin-inline-start
+
+  - id: I18N-002
+    category: I18N
+    severity: warn
+    description: 日期/数字格式化应走 Intl，不要手搓格式串
+    pattern: "\\.(?:toLocaleDateString|toLocaleString)\\(\\s*\\x22"
+    scope: js
+    hint: 用 new Intl.DateTimeFormat(locale).format(date)
+
+  - id: I13N-003
+    category: I18N
+    severity: warn
+    description: 禁止禁用缩放
+    pattern: "user-scalable\\s*=\\s*no|maximum-scale\\s*=\\s*1"
+    scope: html
+
+  # ── COPY：文案 ──────────────────────────────────────────────────
+  - id: COPY-001
+    category: COPY
+    severity: info
+    description: 界面文案不要用「成功」二字收尾（无法核对事实）
+    pattern: "(?:操作|执行|处理)\\s*成功(?:了)?"
+    scope: js
+
+  - id: COPY-002
+    category: COPY
+    severity: info
+    description: 避免占位文案残留
+    pattern: "lorem ipsum|TODO|FIXME|placeholder text"
+    scope: html
+    case_insensitive: true
+
+  - id: COPY-003
+    category: COPY
+    severity: info
+    description: 避免模板化寒暄结尾
+    pattern: "希望对你有帮助|如有其他问题随时问我|如有疑问请随时联系"
+    scope: js
+
+  - id: COPY-004
+    category: COPY
+    severity: info
+    description: 界面文案不要用 emoji 当图标
+    pattern: "[\\u0022\\u0027][^\\u0022\\u0027\\n]{0,4}[\\uD83C-\\uDBFF\\uDC00-\\uDFFF][^\\u0022\\u0027\\n]{0,4}[\\u0022\\u0027]"
+    scope: js
+    hint: 用 SVG 图标或字体图标

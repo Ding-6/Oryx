@@ -1,0 +1,15 @@
+{
+  "name": "oryx-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Oryx 桌面壳（Tauri 2）—— 薄壳一层，业务都在 Python 内核里",
+  "scripts": {
+    "sync": "python scripts/sync_core.py",
+    "sync:check": "python scripts/sync_core.py --check",
+    "dev": "tauri dev",
+    "build": "tauri build --bundles nsis"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

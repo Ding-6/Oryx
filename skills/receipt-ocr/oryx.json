@@ -1,0 +1,17 @@
+{
+  "apiVersion": "oryx/v1",
+  "kind": "skill",
+  "id": "receipt-ocr",
+  "version": "1.0.0",
+  "displayName": "票据识别",
+  "description": "从发票、票据、收据截图中批量提取金额、日期、编号等字段，汇总成表格。",
+  "triggers": ["识别发票", "票据", "收据", "报销", "提取金额"],
+  "eager": false,
+  "allowedTools": ["read_file", "ocr_image", "xlsx_write"],
+  "caps": ["fs.read", "fs.write"],
+  "contracts": {
+    "gates": ["每个字段标注来源图片", "汇总表写盘并给出绝对路径"],
+    "fail_closed_when": ["截图分辨率过低导致金额无法辨认"],
+    "handoffs": []
+  }
+}

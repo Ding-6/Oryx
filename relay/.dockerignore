@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.md
+Dockerfile
+docker-compose.yml
+Caddyfile
+.dockerignore
