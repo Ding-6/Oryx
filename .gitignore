@@ -35,3 +35,6 @@ data/
 *.db
 *.db-wal
 *.db-shm
+
+# AI 生成的原图（处理后的版本在 core/web/assets/ 里）
+generated-images/
