@@ -38,6 +38,7 @@ from .agentlink import AgentLink
 from .config import load_config
 from .events import EventBus
 from .ipc import IpcError
+from .middleware.errors import error_body as _error_body
 from .store import Store
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -182,9 +183,17 @@ async def _require_token(request: Request, call_next):
         or request.query_params.get("t", "")
     )
     if not provided or not _tokens_match(provided, API_TOKEN):
+        # 这里**必须 return 而不是 raise** ——
+        # 用户中间件里 raise 的异常走不到 `ExceptionMiddleware`
+        #（它在最内层、只包着路由），会一路冒到最外层的 ServerErrorMiddleware，
+        # 结果 401 被当成未捕获异常 → 变成 500。
+        # 之前就踩过：把 return 换成 raise，六个安全测试全红。
+        #
+        # 但 body 形状要走统一的 `_error_body` ——
+        # 否则这个接口的错误体跟别的接口长得不一样（只有 detail，没有 code/message）。
         return JSONResponse(
-            {"detail": "缺少或错误的访问令牌（X-Oryx-Token）"},
             status_code=401,
+            content=_error_body(401, "缺少或错误的访问令牌（X-Oryx-Token）"),
         )
 
     # cookie 鉴权 → 必须同源。
@@ -198,21 +207,38 @@ async def _require_token(request: Request, call_next):
     # 那种调用本来就是给命令行与 relay 用的。
     if cookie_token and not _same_origin(request):
         return JSONResponse(
-            {"detail": "跨源请求不接受 cookie 鉴权"},
             status_code=403,
+            content=_error_body(403, "跨源请求不接受 cookie 鉴权"),
         )
 
     # 写操作还要过来源标记这道闸
     if not DISABLE_REQUEST_VALIDATION and request.method not in _SAFE_METHODS:
         if request.headers.get(REQUEST_HEADER) != REQUEST_HEADER_VALUE:
             return JSONResponse(
-                {"detail": f"缺少来源标记（{REQUEST_HEADER}: {REQUEST_HEADER_VALUE}）"},
                 status_code=403,
+                content=_error_body(
+                    403, f"缺少来源标记（{REQUEST_HEADER}: {REQUEST_HEADER_VALUE}）"
+                ),
             )
 
     # 每次请求都同步一次磁盘配置，避免长驻进程用旧数据覆盖用户手改的内容
     config.refresh()
     return await call_next(request)
+
+
+# ── 全局异常处理 + 请求日志 ─────────────────────────────────────────
+#
+# **必须装在 `_require_token` 之后** ——
+# Starlette 里 `add_middleware` 是「后加的在外层」，
+# 所以放在这里才能让请求日志**包住**鉴权中间件：
+# 连 401/403 也会留下日志。
+# 而排障时最需要的恰恰是「这个请求到底有没有到后端」。
+#
+# 之前项目里**一处 logging 配置都没有** —— 未捕获异常只在前端表现为
+# 「没反应」，服务端不留任何痕迹。详见 oryx/middleware/errors.py。
+from .middleware import errors as _errors  # noqa: E402
+
+_errors.install(app)
 
 
 def _same_origin(request: Request) -> bool:
@@ -529,6 +555,12 @@ async def events(request: Request, since: int = -1) -> StreamingResponse:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
+    # 日志配置放在最前面 —— uvicorn.run 会自己装 handler，
+    # 我们要在这之前把根 logger 配好，否则启动阶段的日志就丢了。
+    from .logging_setup import setup_logging
+    from .paths import data_root
+
+    setup_logging(data_root())
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 

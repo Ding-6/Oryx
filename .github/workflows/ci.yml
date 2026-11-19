@@ -1,0 +1,65 @@
+name: CI
+
+# 阶段一之前，这个项目**没有任何 CI** ——
+# 靠人肉记得跑测试。守门工具不常跑等于没有，所以这里把它们钉进 CI。
+#
+# 跑的是 core/scripts/gate.py —— 同一套检查，本地与 CI 完全一致，
+# 不会出现「本地过了 CI 挂了」或反过来。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gate:
+    # 核心是纯 Python，跨平台 —— 放 ubuntu 上跑得快、免费。
+    # Windows 专属的部分（桌面壳）另有 job。
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r core/requirements-dev.txt
+
+      - name: 跑质量闸门
+        run: python core/scripts/gate.py
+
+  desktop-shell:
+    # 桌面壳（Tauri）只在 Windows 上能编译。
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 安装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r core/requirements-dev.txt
+
+      - name: 编译桌面壳
+        working-directory: apps/desktop/src-tauri
+        run: cargo build --release
+
+      - name: 桌面壳单测
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --release
