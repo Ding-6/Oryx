@@ -35,6 +35,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from .agentlink import AgentLink
+from .api.auth import COOKIE_NAME as _AUTH_COOKIE_NAME  # noqa: F401
+from .api.auth import resolve_token_candidate
 from .config import load_config
 from .events import EventBus
 from .ipc import IpcError
@@ -120,7 +122,10 @@ _SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 # 放在 JS 文本里的话，任何能读到那个 .js 的东西都拿到了令牌 ——
 # 包括前端扩展（`import { ORYX_TOKEN } from '/web/modules/core.js'`）
 # 和同机任意网页（`/web/**` 不需要令牌就能读，CORS 又放开 localhost 任意端口）。
-COOKIE_NAME = "oryx_token"
+#
+# 定义在 api/auth.py —— 域里若有路由要自己再校验一次令牌，
+# 两边必须用**同一个** cookie 名。
+COOKIE_NAME = _AUTH_COOKIE_NAME
 
 # 前端静态资源分发（S1）。
 #
@@ -177,11 +182,10 @@ async def _require_token(request: Request, call_next):
         return await call_next(request)
 
     cookie_token = request.cookies.get(COOKIE_NAME)
-    provided = (
-        cookie_token
-        or request.headers.get("x-oryx-token")
-        or request.query_params.get("t", "")
-    )
+    # 三个来源的取法统一走 api/auth.py ——
+    # 域里若有路由要自己再校验一次（背景图那条就是），
+    # 两边的规则必须一致，否则会出现「中间件放行、域里又拒」。
+    provided = resolve_token_candidate(request)
     if not provided or not _tokens_match(provided, API_TOKEN):
         # 这里**必须 return 而不是 raise** ——
         # 用户中间件里 raise 的异常走不到 `ExceptionMiddleware`
