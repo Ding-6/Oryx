@@ -92,7 +92,10 @@ export function fitTopbar() {
   const items = $$('.topbar > *').filter(el =>
     el.offsetParent !== null
     && el.getBoundingClientRect().width > 0
-    && !el.classList.contains('sub'));
+    && !el.classList.contains('sub')
+    // 视图切换 tab 是**固定的导航**，不是对话参数 ——
+    // 不该参与「对话参数挤不挤得下」的判定。
+    && !el.classList.contains('viewtabs'));
   if (!items.length) { bar.dataset.fit = ''; return; }
   const gap = parseFloat(getComputedStyle(bar).columnGap || '8') || 8;
   // **用 scrollWidth 而不是 rect.width** —— rect.width 是「收缩之后」的宽度，

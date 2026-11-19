@@ -89,7 +89,10 @@ $('#modeSel').addEventListener('change', async e => {
  * 以前没有它：窄屏（<620px）下模式、风格、人设、模型**全部无法切换**，
  * 而且设置页里也没有这几个的完整入口 —— 用户在这个宽度下就是残废的。
  */
-$('#topMoreBtn').addEventListener('click', async () => {
+// 这个抽屉是「窄屏时顶栏选择器被收起」的替代入口。
+// 现在顶栏的参数统一收在「⚙」下拉里，按钮换成了 #topMoreDrop ——
+// 这个入口保留着（下拉之外的另一条路），元素不在时不能报错。
+$('#topMoreBtn')?.addEventListener('click', async () => {
   const s = await api('/api/state').then(r => r.json()).catch(() => ({}));
   const pv = await api('/api/providers').then(r => r.json()).catch(() => ({ items: [], active: '' }));
   const experts = s.experts || [];

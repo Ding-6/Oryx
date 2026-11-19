@@ -25,7 +25,7 @@ from _webcheck import describe_busy, ports_free
 # 统一收工：杀 Chrome 的**进程树** + 清它的 profile。
 # 只 terminate 父进程的话，子进程会活下来锁着 profile，
 # 下一次跑 Chrome 就起不来（实测等 160 秒后报「Chrome 没起来」）。
-from _webdrive import kill_tree, stop_chrome
+from _webdrive import kill_tree, stop_chrome, start_server, wait_ready
 import json
 import os
 import shutil
@@ -282,30 +282,13 @@ def main() -> int:
     env["ORYX_HOME"] = str(home)
     # 端口被占 → 这次测的其实是**别人的服务**（或别人的 Chrome），
     # 结论全是假的。先查一下：宁可跳过，也不能给出一个基于错误环境的「通过」。
-    if not ports_free(port):
-        print(f"端口被占用（{describe_busy(port)}）—— 跳过"
-              "（可能有上次的测试进程没退出）")
-        return 0
-    server = subprocess.Popen(
-        [sys.executable, "-m", "oryx", "--no-browser", "--port", str(port)],
-        cwd=str(CORE), env=env,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+    # 走 start_server —— 端口被占时它会往后找一个空端口，
+    # 这个脚本以前自己起服务，端口被占就**静默跳过**，
+    # 套件看着全绿，其实这项没跑。
+    server = start_server(port, Path(env["ORYX_HOME"]), token)
+    port = getattr(server, "oryx_port", port)
     try:
-        ok = False
-        for _ in range(60):
-            time.sleep(0.5)
-            try:
-                req = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/api/ping",
-                    headers={"X-Oryx-Token": token})
-                with urllib.request.urlopen(req, timeout=3) as r:
-                    if r.read():
-                        ok = True
-                        break
-            except Exception:
-                continue
-        if not ok:
+        if not wait_ready(port, timeout=45):
             print("  服务没起来 —— 跳过")
             return 0
 

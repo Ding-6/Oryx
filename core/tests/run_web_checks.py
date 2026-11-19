@@ -77,7 +77,7 @@ def _precheck(scripts: list[Path]) -> None:
             if not _port_free(port):
                 busy.append(f"{p.name}(服务 {port})")
     if busy:
-        print("⚠ 这些端口被占着，相关脚本会跳过：")
+        print("⚠ 这些端口被占着，相关脚本会**换一个端口继续跑**：")
         for b in sorted(set(busy)):
             print(f"    {b}")
         print("  （可能是上次的测试进程没退出 —— 等一会儿或手动清理）\n")

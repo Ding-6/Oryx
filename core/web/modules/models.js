@@ -220,46 +220,156 @@ const WELCOME_GROUPS = [
   ] },
 ];
 
+/* 欢迎页的四张功能卡 —— 对应设计稿里的「开始对话 / 知识库问答 /
+   工作流任务 / 代码助手」。每张卡点下去是**动作**，不是跳页面。 */
+const WELCOME_ACTIONS = [
+  { id: 'chat', tone: 'a', title: '开始对话', sub: '与 AI 助手聊聊',
+    icon: '<path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4 20l1.8-4.6A7.5 7.5 0 1 1 20 11.5z"/>' },
+  { id: 'kb', tone: 'b', title: '知识库问答', sub: '基于你的知识库',
+    icon: '<path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>' },
+  { id: 'wf', tone: 'c', title: '工作流任务', sub: '执行复杂任务',
+    icon: '<circle cx="6" cy="5" r="2.5"/><circle cx="18" cy="5" r="2.5"/><circle cx="12" cy="19" r="2.5"/><path d="M6 7.5v2a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v1"/>' },
+  { id: 'code', tone: 'd', title: '代码助手', sub: '编写与开发支持',
+    icon: '<path d="M9 18l-6-6 6-6M15 6l6 6-6 6"/>' },
+];
+
+/** 用户的称呼 —— 欢迎语里问好用的。
+ *  存在 localStorage 里（纯本地，不需要后端接口）。
+ *  没设过就用「朋友」。 */
+export function userName() {
+  return (localStorage.getItem('oryx-user-name') || '').trim() || '朋友';
+}
+
+export function setUserName(name) {
+  const n = (name || '').trim();
+  if (n) localStorage.setItem('oryx-user-name', n);
+  else localStorage.removeItem('oryx-user-name');
+}
+
+/* ══════════ 场景预设 ══════════
+   输入框顶部那四个 tab（对话 / 联网搜索 / 知识检索 / 代码执行）。
+   一个预设 = **交互模式 + 自动带上相关技能**。
+
+   为什么不是纯装饰：
+   切「联网搜索」时，会按关键词从用户的技能目录里挑出联网类的
+   挂上这一轮 —— 用户自己建的技能也能命中，不用改代码。 */
+const SCENES = {
+  chat: { interaction: 'ask',   match: [] },
+  web:  { interaction: 'ask',   match: ['web', 'search', 'browse', '搜索', '联网', '调研', '抓取'] },
+  kb:   { interaction: 'ask',   match: ['file', 'grep', '知识', '检索', '查找', '文档', '资料'] },
+  code: { interaction: 'craft', match: [] },
+};
+
+/** 切到某个场景预设。 */
+export async function applyScene(name) {
+  const sc = SCENES[name];
+  if (!sc) return;
+  S.scenePreset = name;
+
+  $$('#sceneBar .scene').forEach(b => {
+    const on = b.dataset.scene === name;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+
+  // ① 切交互模式 —— 界面显示的必须是内核真正在用的那个
+  if (S.interaction !== sc.interaction) {
+    try {
+      const r = await api('/api/interaction', {
+        method: 'POST', body: JSON.stringify({ interaction: sc.interaction }),
+      });
+      if (r.ok) {
+        S.interaction = sc.interaction;
+        $$('#interSeg button').forEach(x => x.classList.toggle('on', x.dataset.i === sc.interaction));
+      }
+    } catch (_) { /* 模式没切成功也不该挡住界面 */ }
+  }
+
+  // ② 自动挂上相关技能（不丢用户手动选过的）
+  if (sc.match.length) {
+    try {
+      const d = await (await api('/api/skills')).json();
+      const list = d.skills || [];
+      let added = 0;
+      for (const x of list) {
+        const name2 = x.name || x;
+        const txt = `${name2} ${x.description || ''}`.toLowerCase();
+        if (sc.match.some(k => txt.includes(k.toLowerCase())) && !S.skills.includes(name2)) {
+          S.skills.push(name2);
+          added++;
+        }
+      }
+      paintAttbar();
+      if (added) toast(`已带上 ${added} 个相关技能`);
+    } catch (_) { /* 技能目录拉不到就不带 */ }
+  }
+}
+
 export function paintWelcome() {
   const box = $('#messages');
   if (!box || box.querySelector('.msg') || box.querySelector('.welcome')) return;
   const el = document.createElement('div');
   el.className = 'welcome';
   el.innerHTML = `
-    <div class="whead">
-      <div class="wlogo">OX</div>
-      <div><h2>你好，我是 Oryx</h2>
-        <p>直接说要做什么。我会自己拆解步骤、调用工具，把结果做成能打开的文件交给你。</p></div>
+    <div class="whero">
+      <div class="wtext">
+        <h2>你好，${esc(userName())}！<span class="wave" aria-hidden="true">👋</span></h2>
+        <p>我是你的 AI 工程导师，<br>有什么问题都可以问我哦~</p>
+        <button class="wrename" id="wRename" type="button" title="换个称呼">改个称呼</button>
+      </div>
+      <div class="wheroart">
+        <img src="/web/assets/oryx-mentor.png" alt="" width="300" height="300" />
+      </div>
     </div>
-    ${WELCOME_GROUPS.map(g => `
-      <div class="wgroup">
-        <div class="wgtitle"><span class="wgtag ${g.mode}">${esc(g.label)}</span><span class="wghint">${esc(g.hint)}</span></div>
-        <div class="wcards">${g.items.map(t =>
-          `<button class="wcard" data-wgoal="${escAttr(t)}" data-wmode="${g.mode}" type="button">
-             <span>${esc(t)}</span><span class="wgo">↗</span></button>`).join('')}</div>
-      </div>`).join('')}
+    <div class="wacts">
+      ${WELCOME_ACTIONS.map(a => `
+        <button class="wact" data-wact="${a.id}" type="button">
+          <span class="wact-ic ${a.tone}" aria-hidden="true"><svg viewBox="0 0 24 24">${a.icon}</svg></span>
+          <span class="wact-tx"><b>${esc(a.title)}</b><i>${esc(a.sub)}</i></span>
+          <span class="wact-go" aria-hidden="true">›</span>
+        </button>`).join('')}
+    </div>
     <div class="wfoot">也可以把文件拖进窗口，或 <span class="kbd">Ctrl+V</span> 粘贴截图。破坏性动作会先出执行计划等你确认。</div>`;
   box.appendChild(el);
+
   el.addEventListener('click', async (e) => {
-    const b = e.target.closest('[data-wgoal]');
-    if (!b) return;
-    const mode = b.dataset.wmode;
-    // 与顶栏切换走同一条路：把模式写回内核，避免「界面显示 plan / 请求却发 craft」
-    if (mode && mode !== (S.interaction || 'craft')) {
-      try {
-        const r = await api('/api/interaction', {
-          method: 'POST', body: JSON.stringify({ interaction: mode }),
-        });
-        if (!r.ok) { toast('切换模式失败，仍按当前模式发送'); }
-        else {
-          S.interaction = mode;
-          $$('#interSeg button').forEach(x => x.classList.toggle('on', x.dataset.i === mode));
-        }
-      } catch (_) { toast('切换模式失败，仍按当前模式发送'); }
+    // 改称呼
+    const rn = e.target.closest('#wRename');
+    if (rn) {
+      const v = window.prompt('希望我怎么称呼你？', userName());
+      if (v !== null) { setUserName(v); paintWelcome(); }
+      return;
     }
-    $('#input').value = b.dataset.wgoal;
-    autoGrow();
-    $('#input').focus();
+
+    const b = e.target.closest('[data-wact]');
+    if (!b) return;
+    const act = b.dataset.wact;
+
+    if (act === 'chat') {
+      const inp = $('#input');
+      if (inp) { inp.focus(); autoGrow(); }
+      return;
+    }
+    if (act === 'kb') {
+      // 打开本地资料里的知识库
+      const kb = document.querySelector('.navitem.localhead');
+      if (kb) kb.click();
+      const item = document.querySelector('#localSub .subitem[data-lv="kb"]');
+      if (item) item.click();
+      return;
+    }
+    if (act === 'wf') {
+      const nav = document.querySelector('.navitem[data-view="workflows"]');
+      if (nav) nav.click();
+      return;
+    }
+    if (act === 'code') {
+      // 代码助手：切到「执行」模式并给一个起步的提示词
+      const goal = '帮我写一段 Python 代码，实现一个批量重命名文件的脚本，先给出方案再动手。';
+      const inp = $('#input');
+      if (inp) { inp.value = goal; autoGrow(); inp.focus(); }
+      return;
+    }
   });
 }
 
@@ -486,11 +596,57 @@ async function doRewind(checkpointId, scope) {
   renderDetail();
 }
 
+/* ══════════ 右栏「助手」视图 ══════════ */
+
+/** 切右栏的视图：助手（快捷功能 + 最近对话）/ 执行（过程面板）。 */
+export function switchSideView(v) {
+  $$('#side .stview-tab').forEach(b => {
+    const on = b.dataset.sv === v;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  $$('#side .sview').forEach(v2 => v2.classList.toggle('on', v2.id === 'sv-' + v));
+}
+
+/** 右栏的「最近对话」—— 取最近 5 条，带相对时间。 */
+export function paintSideRecent() {
+  const box = $('#sideRecent');
+  if (!box) return;
+  const list = (S.sessions || []).slice()
+    .sort((a, b) => (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0))
+    .slice(0, 5);
+  if (!list.length) { box.innerHTML = '<div class="empty">还没有对话</div>'; return; }
+  box.innerHTML = list.map(s => `
+    <button class="sr" data-sid="${escAttr(s.id)}" type="button" title="${esc(s.title || '（空对话）')}">
+      <svg class="sric" aria-hidden="true" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+      <span class="srtx">${esc(s.title || '（空对话）')}</span>
+      <span class="srtime">${esc(relTime(s.updated_at || s.created_at))}</span>
+    </button>`).join('');
+}
+
+/** 相对时间：刚刚 / 10:24 / 昨天 / 11-08 */
+function relTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) {
+    const diff = (now - d) / 1000;
+    if (diff < 60) return '刚刚';
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  const y = new Date(now.getTime() - 86400000);
+  if (d.toDateString() === y.toDateString()) return '昨天';
+  return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
 export async function loadSessions() {
   const d = await (await api('/api/sessions')).json();
   S.sessions = d.sessions || [];
   $('#sessCnt').textContent = S.sessions.length || '';
   const box = $('#sessList');
+  // 右栏的「最近对话」是同一份数据的另一个视图 —— 一处变，两处都变
+  paintSideRecent();
   if (!S.sessions.length) { box.innerHTML = '<div class="empty">还没有对话</div>'; return; }
   // 按时间分组 —— 一堆平铺的会话找不到「昨天那个」
   // 组内按最近动过的时间排：刚聊完的那条在最上面。
@@ -717,7 +873,11 @@ export async function refreshState() {
     const s = await (await api('/api/state')).json();
     S.interaction = s.interaction; S.style = s.style; S.expert = s.expert || ''; S.mode = s.mode;
     S.provider = s.provider || '';
-    $('#modelChip').textContent = `${s.provider || '未配置'} · ${s.model || '—'}`;
+    // 只改文字节点 —— modelChip 里有图标和下拉箭头，
+    // 直接设 textContent 会把它们一起抹掉。
+    const mt = $('#modelChipText');
+    if (mt) mt.textContent = `${s.provider || '未配置'} · ${s.model || '—'}`;
+    else $('#modelChip').textContent = `${s.provider || '未配置'} · ${s.model || '—'}`;
     $('#modeSel').value = s.mode;
     // 副标题写当前跑的是本地还是云端 —— 不看 provider 名字猜
     $('#pageSub').textContent = s.provider ? (s.provider_is_local ? '本地模型' : '云端模型') : '';

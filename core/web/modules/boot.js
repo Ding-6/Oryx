@@ -5,7 +5,7 @@
 
 import { connect } from './agui.js';
 import { autoCollapse, fitTopbar } from './layout.js';
-import { loadSessions, loadTeams, loadWorkflowRuns, loadWorkflowTemplates, openSession, refreshState, setLocalOpen, setView } from './models.js';
+import { loadSessions, loadTeams, loadWorkflowRuns, loadWorkflowTemplates, openSession, refreshState, setLocalOpen, setView, paintWelcome } from './models.js';
 import { applyBg, applyTheme } from './theme.js';
 import { $, api, applyClamp, bus, toast } from './core.js';
 import { loadUiExtensions } from './uiext.js';
@@ -70,6 +70,9 @@ clampObserver.observe(document.body, { childList: true, subtree: true });
   window.addEventListener('resize', fitTopbar);
   connect();
   await refreshState(); await loadSessions(); await loadTeams();
+  // 首屏是空会话 —— 给欢迎页（问候 + 插画 + 功能入口），
+  // 别让人对着一片空白不知道从哪开始。
+  paintWelcome();
   await loadWorkflowRuns(true); await loadWorkflowTemplates(true);
   // 前端扩展：用户目录下的界面模块，不改核心文件就能加。
   // 放在最后 —— 核心先起来，扩展挂了也不影响主界面。

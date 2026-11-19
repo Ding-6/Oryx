@@ -3,28 +3,33 @@
 
 
   :root {
-    /* ── Oryx console — neutral + indigo ────────────────── */
-    --bg:        #F6F6F8;
+    /* ── Oryx console — lavender + indigo ────────────────────
+       配色跟着设计稿走：整体是**淡紫调**，不是中性灰。
+       页面底从「左白右紫」的渐变，卡片纯白浮在上面。 */
+    --bg:        #F5F3FE;
     --bg-2:      #FFFFFF;
-    --panel:     #EFEFF1;
-    --panel-2:   #E5E5E9;
+    --panel:     #F3F1FC;
+    --panel-2:   #E9E6F9;
     --card:      #FFFFFF;
-    --line:      #E3E3E8;
-    --line-strong:#D2D2D9;
-    --rule:      #E3E3E8;
+    --line:      #E6E3F6;
+    --line-strong:#D4D0EE;
+    --rule:      #E6E3F6;
 
-    --ink:       #17171B;
-    --ink-2:     #4C4C55;
+    --ink:       #1B1A2E;
+    --ink-2:     #494767;
     /* --muted 从 #8B8B95 调深到 #6B6B75 ——
        原来的值在页面底上只有 2.94:1，在面板底上 2.69:1，
        全站 77 处小字（计数徽章、目录名、说明、日期、占位符…）
        达不到 WCAG AA 的 4.5:1 —— 看着「有点淡」但说不清淡在哪。
        现在的值在页面底 4.59:1、卡片底 4.88:1。 */
-    --muted:     #6B6B75;
+    --muted:     #67658A;
 
-    --accent:    #4F46E5;
-    --accent-soft:#EEF0FD;
-    --accent-line:#C9CDF7;
+    /* accent 从 #6366F1 调到 #565AE0 ——
+       前者白字在紫底上只有 4.47:1、紫字在浅紫底上只有 3.81:1，
+       两头都差一点。现在：白字 5.32:1，紫字 4.54:1。 */
+    --accent:    #565AE0;
+    --accent-soft:#EDEBFE;
+    --accent-line:#C4C0F6;
     /* 主色上的前景色 —— 单独一个变量，换主色时不会忘了改按钮上的字色 */
     --on-accent: #FFFFFF;
 
@@ -49,8 +54,37 @@
     --r:    8px;
     --r-lg: 12px;
 
+    /* ── 品牌紫的渐变与功能色 ──
+       以前这些值直接写死在各个规则里（十六进制），
+       审计会报「颜色应走 CSS 变量」—— 也确实该改：
+       换主题时这些地方要一处一处改，漏一个就不成套。 */
+    /* 品牌紫：白字压在它上面要过 4.5:1 ——
+       #6D6DF5 只有 4.07:1，调深到下面这两个值才达标。 */
+    /* 主渐变：#7A5AF3 白字在上面 4.58:1 —— 刚好过 AA，
+       又比「为了达标而压暗」的 #5B5FE8 更接近设计稿的亮紫。
+       （设计稿原色 #7C5CF5 是 4.46:1，差一点点，压暗一档就过了。） */
+    --brand-1:   #7A5AF3;   /* 主渐变起 */
+    --brand-2:   #8350EC;   /* 主渐变止 */
+    /* 品牌紫**渐变**上的字色 —— 与 --on-accent 分开：
+       accent 色在明暗两套里明暗相反（浅色深紫 / 暗色亮紫），
+       品牌紫两套都是「够深配白字」，
+       共用一个变量的话，两边必有一边不达标。 */
+    --on-brand:  #FFFFFF;
+    --brand-3:   #7C7BF7;   /* logo 图标渐变 */
+    --brand-4:   #8B5CF6;
+    --grad-1:    #FBFAFF;   /* 页面渐变 */
+    --grad-2:    #F5F3FE;
+    --grad-3:    #EDEAFD;
+    --glow:      rgba(139,124,246,.16);  /* 右上角光晕 */
+
+    /* 功能卡的四个图标块底色（紫 / 绿 / 橙 / 蓝） */
+    --tint-a-bg:#EDEAFE;  --tint-a-fg:#6D5CF5;
+    --tint-b-bg:#E4F1FF;  --tint-b-fg:#3B82F6;
+    --tint-c-bg:#E3F8EE;  --tint-c-fg:#10B981;
+    --tint-d-bg:#FEF0E2;  --tint-d-fg:#F59E0B;
+
     --bg-image:  none;
-    --bg-overlay:rgba(246,246,248,.92);
+    --bg-overlay:rgba(245,243,254,.92);
     --grain-opacity:0;
 
     --font-display: "Inter Tight", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
@@ -58,25 +92,27 @@
     --font-mono:    "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   }
   [data-theme="dark"] {
-    --bg:        #0B0B0D;
-    --bg-2:      #101014;
-    --panel:     #0F0F13;
-    --panel-2:   #1B1B21;
-    --card:      #141419;
-    --line:      #232329;
-    --line-strong:#33333B;
-    --rule:      #232329;
+    --bg:        #0D0C16;
+    --bg-2:      #131120;
+    --panel:     #100F1B;
+    --panel-2:   #1E1C2E;
+    --card:      #16151F;
+    --line:      #26233A;
+    --line-strong:#38344F;
+    --rule:      #26233A;
 
-    --ink:       #EDEDF0;
-    --ink-2:     #B5B5BD;
+    --ink:       #EFEDF8;
+    --ink-2:     #BDB9D4;
     /* 暗色下反过来要**调亮**：#74747E 在卡片底上只有 3.97:1。
        暗色主题里「次要文字太暗」是最常见的可读性问题 ——
        屏幕上看着还行，实际读起来费劲。现在页面底 5.24:1、卡片底 4.89:1。 */
-    --muted:     #83838D;
+    --muted:     #918CAE;
 
-    --accent:    #818CF8;
-    --accent-soft:#1C1F3A;
-    --accent-line:#3B4066;
+    --accent:    #A5B4FC;
+    --accent-soft:#221F42;
+    --accent-line:#413C6B;
+    /* 暗色下 accent 是**亮紫** —— 压在它上面的字必须是深色。
+       （品牌紫那边是另一套，用 --on-brand。） */
     --on-accent: #0B0B0D;
 
     --ok:        #4ADE80;
@@ -97,7 +133,25 @@
     --shadow:    none;
     --shadow-md: 0 2px 10px rgba(0,0,0,.4);
     --shadow-lg: 0 18px 44px rgba(0,0,0,.55);
-    --bg-overlay:rgba(11,11,13,.88);
+    --bg-overlay:rgba(13,12,22,.88);
+
+    /* 暗色下的品牌紫：**暗紫底 + 白字**。
+       浅色主题是亮紫底深字，暗色反过来 ——
+       亮紫底在深色界面里太跳，看着像贴上去的一块。 */
+    --brand-1:   #4F52C8;
+    --brand-2:   #5B44B8;
+    --on-brand:  #FFFFFF;
+    --brand-3:   #8E8DFA;
+    --brand-4:   #A78BFA;
+    --grad-1:    #0E0D18;
+    --grad-2:    #100E1C;
+    --grad-3:    #0C0B14;
+    --glow:      rgba(99,102,241,.18);
+
+    --tint-a-bg:#241F45;  --tint-a-fg:#A78BFA;
+    --tint-b-bg:#16283F;  --tint-b-fg:#60A5FA;
+    --tint-c-bg:#12301F;  --tint-c-fg:#34D399;
+    --tint-d-bg:#33240F;  --tint-d-fg:#FBBF24;
   }
   :root, [data-theme="dark"] {
     --text: var(--ink);
@@ -161,14 +215,25 @@
     font-family:var(--font-body);
     font-size:13.5px;
     line-height:1.62;
-    background-color:var(--bg);
+    /* **紫调渐变底** —— 设计稿的页面不是平色，是左白右紫的柔光。
+       两层叠加：右上角一团淡紫光晕 + 一道斜向的浅紫渐变。 */
+    background:
+      radial-gradient(1100px 560px at 78% 4%, var(--glow) 0%, transparent 62%),
+      linear-gradient(132deg, var(--grad-1) 0%, var(--grad-2) 42%, var(--grad-3) 100%);
     -webkit-font-smoothing:antialiased;
+  }
+  [data-theme="dark"] body {
+    background:
+      radial-gradient(1100px 560px at 78% 4%, var(--glow) 0%, transparent 62%),
+      linear-gradient(132deg, var(--grad-1) 0%, var(--grad-2) 45%, var(--grad-3) 100%);
   }
   /* 背景图独立成层：fixed inset:0 保证铺满整个窗口，
      不受 rail / center / side / page 各自背景色的挤压。 */
   #bgLayer {
     position:fixed; inset:0; z-index:0;
+    /* 用户设了背景图时，渐变底要让位 —— 否则图被紫雾盖住 */
     background-image:var(--bg-image);
+    background-color:transparent;
     background-size:var(--bg-size,cover);
     background-position:var(--bg-pos,center);
     background-repeat:var(--bg-repeat,no-repeat);

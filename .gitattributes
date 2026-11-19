@@ -1,0 +1,17 @@
+# 统一行尾：仓库里存 LF，检出时按平台自动转换。
+#
+# 为什么要显式写：
+# 之前没写，靠 `core.autocrlf` 这个**本地配置**兜着。
+# 一旦某台机器把它设成 false，工作区的 CRLF 会直接进库，
+# 整个文件在 diff 里变成「全删全增」—— 几千行改动看不出改了什么。
+#
+# 写进仓库以后，行为跟每个人的本地配置无关了。
+* text=auto
+
+# 二进制文件不做行尾转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.exe binary
+*.pdf binary
+*.mp4 binary

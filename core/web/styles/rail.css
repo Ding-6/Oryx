@@ -13,7 +13,9 @@
     display:flex; flex-direction:column; min-height:0;
     position:relative;
     border-right:1px solid var(--line);
-    background:var(--bg);
+    /* 左栏是**淡紫面板**，比页面底略深一点 ——
+       设计稿里它和中央区分属两块色域，不是一条线。 */
+    background:var(--panel);
   }
   /* 面板本体 —— 宽度与 #rail 相同，不再有独立卡片。 */
   .railcard {
@@ -39,29 +41,43 @@
   .railgroup .gt { flex:0 0 auto; }
   .railgroup #sessList { flex:1 1 auto; min-height:0; overflow-y:auto; padding:0 6px 8px; }
   .railgroup #sessList::-webkit-scrollbar { width:6px; }
-  .railhead { padding:16px 14px 10px; }
+  .railhead { padding:18px 14px 10px; }
   .logo {
-    display:flex; align-items:center; gap:8px;
-    font-size:19px; font-weight:700;
-    letter-spacing:-.4px;
-    padding:0 4px;
+    display:flex; align-items:center; gap:10px;
+    padding:0 2px;
   }
-  .logo em { font-style:normal; color:var(--accent); }
-  .logo .tag {
-    font-size:10px;
-    font-weight:600;
-    text-transform:uppercase; letter-spacing:1px;
-    color:var(--muted);
-    margin-left:auto;
+  /* 紫色渐变方块 + 白色四角星 */
+  .logo .lmark {
+    width:30px; height:30px; flex:0 0 30px;
+    border-radius:9px;
+    display:grid; place-items:center;
+    background:linear-gradient(140deg, var(--brand-3) 0%, var(--accent) 55%, var(--brand-4) 100%);
+    box-shadow:0 4px 12px -3px color-mix(in srgb, var(--accent) 55%, transparent);
   }
-  .logo .live { width:7px; height:7px; border-radius:50%; background:var(--muted); display:inline-block; }
+  .logo .lmark svg { width:17px; height:17px; fill:#FFFFFF; stroke:none; }
+  .logo .ltxt { display:flex; flex-direction:column; min-width:0; line-height:1.25; }
+  .logo .ltxt b {
+    font-size:18px; font-weight:700; letter-spacing:-.3px;
+    color:var(--accent);
+  }
+  .logo .ltxt i {
+    font-style:normal; font-size:10px; font-weight:500;
+    color:var(--muted); letter-spacing:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .logo .live {
+    width:7px; height:7px; border-radius:50%;
+    background:var(--muted); display:inline-block;
+    margin-left:auto; flex:0 0 7px;
+  }
   .logo .live.on { background:var(--ok); box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent); }
   .search {
-    margin-top:14px; display:flex; align-items:center; gap:8px;
-    background:var(--bg-2);
+    margin-top:16px; display:flex; align-items:center; gap:8px;
+    background:var(--card);
     border:1px solid var(--line);
-    border-radius:var(--r);
-    padding:7px 10px;
+    border-radius:12px;
+    padding:9px 12px;
+    box-shadow:var(--shadow);
   }
   .search:focus-within { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
   .search input { flex:1; border:0; background:transparent; outline:none; font-size:13px; min-width:0; }
@@ -85,7 +101,15 @@
     transition:color .15s ease, background .15s ease;
   }
   .navitem:hover { background:var(--panel-2); color:var(--ink); }
-  .navitem.on { background:var(--bg-2); color:var(--ink); font-weight:600; box-shadow:var(--shadow); }
+  /* 选中态：**淡紫底 + 紫字** —— 不是白色块。
+     设计稿里当前页是「紫调高亮」，一眼能看出来。 */
+  .navitem.on {
+    /* 文字用 ink（深色）而不是 accent（紫）——
+       紫字在浅紫底上只有 4.3:1，13.5px 的正文差一口气不到 AA。
+       紫留给图标（图形元素 3:1 就够），视觉上还是紫色高亮。 */
+    background:var(--accent-soft); color:var(--ink);
+    font-weight:600;
+  }
   .navitem.on .ic { stroke:var(--accent); }
   /* 「新建对话」是 Marvis 那种独立操作项 —— 单独一条、单独一种颜色，
      不跟下面那些「切换页面」的导航项混在一起。
@@ -93,19 +117,26 @@
      一眼就知道这是个动作，不是「当前在哪个页面」。
      之前它跟导航项长得一样（图标 + 文字 + 同一个 .on 态），
      高亮的时候跟当前页面的选中项完全分不清。 */
+  /* 「新建对话」= **紫色实心胶囊**。
+     以前是深色实心块 —— 在现在这套淡紫配色里，深灰块又脏又沉。
+     改成主色渐变，一眼就知道「这是主操作」。 */
   .navitem.newchat {
-    margin:2px 0 8px;
-    background:var(--ink);
-    color:var(--panel);
+    margin:0 0 10px;
+    padding:10px 14px;
+    border-radius:999px;
+    background:linear-gradient(120deg, var(--brand-1) 0%, var(--brand-2) 100%);
+    color:var(--on-brand);
     font-weight:600;
-    box-shadow:var(--shadow);
+    box-shadow:0 6px 16px -6px color-mix(in srgb, var(--accent) 70%, transparent);
   }
-  .navitem.newchat:hover { background:var(--ink); color:var(--panel); filter:brightness(1.18); }
+  .navitem.newchat:hover { filter:brightness(1.06); color:var(--on-brand); }
   .navitem.newchat .ic { stroke:currentColor; stroke-width:1.9; }
   /* 点过之后不该还留着「选中」的高亮 —— 它是个动作，不是当前位置 */
-  .navitem.newchat.on { background:var(--ink); color:var(--panel); }
+  .navitem.newchat.on {
+    background:linear-gradient(120deg, var(--brand-1) 0%, var(--brand-2) 100%);
+    color:var(--on-brand);
+  }
   .navitem.newchat.on .ic { stroke:currentColor; }
-  [data-theme="dark"] .navitem.newchat { background:var(--panel-2); color:var(--ink); }
   /* 「本地资料」是纯分组头：点它弹浮层，不在导航里往下撑高度 */
   .navitem.localhead { margin-top:6px; }
   .navitem.localhead .caret { transform:rotate(0deg); }
@@ -245,3 +276,27 @@
   .iconbtn:hover { background:var(--panel-2); }
   .iconbtn svg { width:15px; height:15px; stroke:var(--ink-2); fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
 
+  /* 「对话历史」标题行：左边标题，右边 ⋯ 按钮 */
+  /* 标题行要跟下面的会话列表**左边对齐** ——
+     列表有 6px 内边距，标题没有的话「对话历史」会顶到边上。 */
+  .railgroup .gt { display:flex; align-items:center; gap:8px; padding:10px 6px 6px; }
+  .railgroup .gtmore {
+    margin-left:auto; border:0; background:transparent; cursor:pointer;
+    color:var(--muted); padding:3px 5px; border-radius:6px;
+    display:flex; align-items:center;
+  }
+  .railgroup .gtmore:hover { color:var(--accent); background:var(--accent-soft); }
+  .railgroup .gtmore svg { width:15px; height:15px; fill:currentColor; stroke:none; }
+  .railgroup .tw { margin-left:0; }
+
+  /* 「查看更多」—— 设计稿里它在会话列表下面一行，
+     不是个占满整栏的按钮。 */
+  .seeall {
+    flex:0 0 auto;
+    display:flex; align-items:center; gap:4px;
+    border:0; background:transparent; cursor:pointer;
+    color:var(--muted); font-size:var(--fs-xs);
+    padding:8px 8px 10px; text-align:left;
+  }
+  .seeall:hover { color:var(--accent); }
+  .seeall span { font-size:14px; line-height:1; }

@@ -23,8 +23,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _webcheck import describe_busy, ports_free  # noqa: E402
-from _webdrive import (Result, install_ui_ext, run_probe,  # noqa: E402
-                        start_server, stop_server, wait_ready)
+from _webdrive import (Result, current_port, install_ui_ext,  # noqa: E402
+                        run_probe, start_server, stop_server, wait_ready)
 
 PORT = 8788
 CDP_PORT = 9351
@@ -47,10 +47,12 @@ def _panel_js(ext_id: str) -> str:
 
 
 def main() -> int:
+    # 端口被占用**不再跳过**。
+    # 以前这里直接 return 0 —— 测试「通过」了，但实际一行都没跑：
+    # 上个脚本的残留进程还占着端口时，套件看起来全绿，其实漏测。
+    # 现在 `start_server` 会往后找一个空端口，测试照跑不误。
     if not ports_free(PORT):
-        print(f"端口被占用（{describe_busy(PORT)}）—— 跳过"
-              "（可能有上次的测试进程没退出）")
-        return 0
+        print(f"端口 {PORT} 被占用（{describe_busy(PORT)}）—— 换一个端口继续跑")
 
     home = Path(tempfile.mkdtemp())
     install_ui_ext(home, "plain",
@@ -67,14 +69,17 @@ def main() -> int:
                    _panel_js("needs-missing"))
 
     server = start_server(PORT, home, TOKEN)
+
+
+    srv_port = current_port(PORT)
     try:
-        if not wait_ready(PORT):
+        if not wait_ready(srv_port):
             print("服务没起来")
             return 1
 
         # ── 清单接口：谁被放行、谁被拦、理由是什么 ──────────────────
         req = urllib.request.Request(
-            f"http://127.0.0.1:{PORT}/api/ui/modules",
+            f"http://127.0.0.1:{srv_port}/api/ui/modules",
             headers={"X-Oryx-Token": TOKEN})
         data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
         ids = [e["id"] for e in data.get("extensions", [])]
@@ -89,7 +94,7 @@ def main() -> int:
                 skipped.get("needs-missing", "(没进 skipped)"))
 
         # ── 浏览器：确实挂上了、确实没挂上 ─────────────────────────
-        probe = run_probe(PORT, CDP_PORT, """(()=>{
+        probe = run_probe(srv_port, CDP_PORT, """(()=>{
             const out = {mounted: [], hosts: 0};
             for (const host of document.querySelectorAll('.uiext-host')) {
                 out.hosts++;
@@ -109,7 +114,7 @@ def main() -> int:
                 "needs-missing" not in mounted, str(mounted))
 
         # ── 设置页：用户能看见「有扩展没加载」 ──────────────────────
-        probe2 = run_probe(PORT, CDP_PORT, """(async () => {
+        probe2 = run_probe(srv_port, CDP_PORT, """(async () => {
             const sleep = ms => new Promise(r => setTimeout(r, ms));
             // 设置面板要先打开 —— 标签的点击监听是渲染时才绑的
             await window.__openExtensionsTab();

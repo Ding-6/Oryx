@@ -9,7 +9,11 @@ import { $, $$, S, api, cnSkill, esc, toast } from './core.js';
 
 /* ══════ 提示词优化（弹层可编辑 + 可自选接入 skill） ══════ */
 S.optSkills = null;          // null = 沿用对话已绑的 S.skills；数组 = 本弹层单独选
-$('#optBtn').addEventListener('click', async () => {
+
+/** 打开「优化这句表达」弹层。
+ *  导出成函数而不是绑死在按钮上 —— 按钮收进了「更多设置」菜单，
+ *  入口位置变了，但这个能力本身不能消失。 */
+export async function openPromptOpt() {
   const text = $('#input').value.trim();
   if (!text) { toast('先写一句要做什么，我再帮你优化'); $('#input').focus(); return; }
 
@@ -101,4 +105,4 @@ $('#optBtn').addEventListener('click', async () => {
     closeModal();
     toast(picked.length ? `已填入输入框 · 接入 ${picked.length} 个技能` : '已填入输入框');
   });
-});
+}

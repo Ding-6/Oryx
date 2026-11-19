@@ -347,3 +347,87 @@
   .mini:hover { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
   .mini:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 
+
+  /* ══════════ 右栏：助手视图 ══════════
+     设计稿的右栏是**两张白卡片**（快捷功能 + 最近对话）浮在淡紫底上，
+     不是一整块面板里放页签。
+     原来的 7 个页签（执行过程）保留在「执行」视图里 —— 功能不能丢。 */
+  .sview { display:none; }
+  .sview.on { display:block; }
+
+  .scard {
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:14px 14px 12px;
+    margin-bottom:12px;
+    box-shadow:var(--shadow);
+  }
+  .scard-hd {
+    display:flex; align-items:center; gap:8px;
+    margin-bottom:12px;
+  }
+  .scard-hd b { font-size:13.5px; font-weight:650; color:var(--ink); letter-spacing:-.1px; }
+  .scard-ic { font-size:14px; line-height:1; }
+  .scard-more {
+    margin-left:auto; border:0; background:transparent; cursor:pointer;
+    color:var(--muted); font-size:var(--fs-xs);
+    display:flex; align-items:center; gap:2px;
+    padding:2px 4px; border-radius:6px;
+  }
+  .scard-more:hover { color:var(--accent); background:var(--accent-soft); }
+
+  /* 快捷功能：图标块 + 标题 + 副标题 + 箭头 */
+  .squick { display:flex; flex-direction:column; gap:2px; }
+  .sq {
+    display:flex; align-items:center; gap:10px;
+    width:100%; text-align:left;
+    border:0; background:transparent; cursor:pointer;
+    padding:8px 6px; border-radius:10px;
+    transition:background var(--dur-fast) ease;
+  }
+  .sq:hover { background:var(--panel-2); }
+  .sq-ic {
+    width:32px; height:32px; flex:0 0 32px;
+    display:grid; place-items:center; border-radius:10px;
+  }
+  .sq-ic svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .sq-ic.a { background:var(--tint-a-bg); color:var(--tint-a-fg); }
+  .sq-ic.b { background:var(--tint-c-bg); color:var(--tint-c-fg); }
+  .sq-ic.c { background:var(--tint-d-bg); color:var(--tint-d-fg); }
+  .sq-ic.d { background:var(--tint-b-bg); color:var(--tint-b-fg); }
+  .sq-tx { display:flex; flex-direction:column; min-width:0; flex:1 1 auto; }
+  .sq-tx b { font-size:12.5px; font-weight:600; color:var(--ink); }
+  .sq-tx i { font-style:normal; font-size:var(--fs-xs); color:var(--muted); margin-top:1px; }
+  .sq-go { flex:0 0 auto; color:var(--muted); font-size:16px; line-height:1; }
+  .sq:hover .sq-go { color:var(--accent); }
+
+  /* 最近对话：文档图标 + 标题 + 相对时间 */
+  .srecent { display:flex; flex-direction:column; gap:1px; }
+  .sr {
+    display:flex; align-items:center; gap:8px;
+    padding:7px 6px; border-radius:8px; cursor:pointer;
+    border:0; background:transparent; width:100%; text-align:left;
+  }
+  .sr:hover { background:var(--panel-2); }
+  .sr .sric { flex:0 0 14px; width:14px; height:14px; stroke:var(--muted); fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  .sr .srtx {
+    flex:1 1 auto; min-width:0;
+    font-size:12px; color:var(--ink-2);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .sr:hover .srtx { color:var(--ink); }
+  .sr .srtime { flex:0 0 auto; font-size:var(--fs-xs); color:var(--muted); }
+
+  /* 「执行」视图里的第二层页签 */
+  .stabs.sub {
+    position:static; padding-right:0;
+    border-bottom:1px solid var(--line);
+    background:transparent;
+    margin:0 -16px 12px; padding:0 16px;
+  }
+  .stabs.sub button {
+    flex:0 0 auto; min-width:0;
+    padding:7px 2px 9px;
+    font-size:var(--fs-sm);
+  }

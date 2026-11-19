@@ -181,6 +181,7 @@ export function md(src) {
 export const S = {
   view: 'chat', sessions: [], current: null, steps: new Map(), todos: [],
   artifacts: [], busy: false, term: null, assistant: null, scene: 'office',
+  scenePreset: 'chat',   // 输入框顶部的场景预设
   interaction: 'craft', style: 'professional', expert: '', mode: 'efficiency', provider: '',
   // 当前界面认哪个任务的事件。
   // 空串 = 不认任何任务的事件（刚点「新建对话」时的状态）。

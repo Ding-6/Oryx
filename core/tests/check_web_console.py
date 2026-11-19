@@ -46,9 +46,15 @@ def main() -> int:
     find_chrome()
     home = Path("D:/OryxData/tmp/shot-home")
     home.mkdir(parents=True, exist_ok=True)
-    srv = start_server(8782, home, "console-token")
+    # 端口必须**独占** —— 之前用了 8782，和 check_web_settings_ext.py 撞了，
+    # 两个脚本一前一后跑，第二个就「服务没起来」。
+    # 8813 是这个脚本专属的。
+    srv = start_server(8813, home, "console-token")
+    # **实际端口** —— start_server 端口被占时会往后挪，
+    # 访问时必须用挪完的那个，不能还连着写死的旧端口。
+    port = getattr(srv, "oryx_port", 8813)
     try:
-        wait_ready(8782, timeout=40)
+        wait_ready(port, timeout=40)
         time.sleep(2)
         errors: list[tuple[str, str, str]] = []
         with sync_playwright() as p:
@@ -79,7 +85,7 @@ def main() -> int:
             page.on("pageerror", on_error)
             page.on("console", on_console)
 
-            page.goto("http://127.0.0.1:8782/", wait_until="domcontentloaded")
+            page.goto(f"http://127.0.0.1:{port}/", wait_until="domcontentloaded")
             page.wait_for_timeout(3500)
 
             for label, js in VIEWS:

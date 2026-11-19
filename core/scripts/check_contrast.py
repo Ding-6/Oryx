@@ -105,10 +105,32 @@ def main() -> int:
                                 const a = fg.a;
                                 return fg.rgb.map((c, i) => c * a + bg[i] * (1 - a));
                             }
+                            /* 从渐变里取一个代表色 —— 取第一个 color-stop。
+                               页面底现在是 `linear-gradient(...)`，只看
+                               background-color 会一路往上找到纯白，
+                               把「白字在紫底上」误判成「白字在白底上」。 */
+                            function gradColor(img) {
+                                if (!img || img === 'none') return null;
+                                const m = img.match(/rgba?\\(([^)]+)\\)/);
+                                if (!m) return null;
+                                const parts = m[1].split(',').map(x => parseFloat(x));
+                                return { rgb: parts.slice(0, 3), a: parts.length > 3 ? parts[3] : 1 };
+                            }
+
                             function bgOf(el) {
                                 let node = el;
                                 while (node && node !== document.documentElement) {
                                     const cs = getComputedStyle(node);
+                                    // 先看渐变：它盖在 background-color 上面，
+                                    // 实际呈现的是渐变色。
+                                    const g = gradColor(cs.backgroundImage);
+                                    if (g && g.a > 0.01) {
+                                        if (g.a < 1) {
+                                            const under = bgOf(node.parentElement) || [255,255,255];
+                                            return over(g, under);
+                                        }
+                                        return g.rgb;
+                                    }
                                     const c = parse(cs.backgroundColor);
                                     if (c && c.a > 0.01) {
                                         if (c.a < 1) {

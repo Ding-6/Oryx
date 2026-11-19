@@ -24,8 +24,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _webcheck import describe_busy, ports_free  # noqa: E402
-from _webdrive import (Result, run_probe, start_server,  # noqa: E402
-                        stop_server, wait_ready)
+from _webdrive import (Result, current_port, run_probe,  # noqa: E402
+                        start_server, stop_server, wait_ready)
 
 PORT = 8786
 CDP_PORT = 9349
@@ -72,10 +72,12 @@ def _skill_names(port: int) -> list[str]:
 
 
 def main() -> int:
+    # 端口被占用**不再跳过**。
+    # 以前这里直接 return 0 —— 测试「通过」了，但实际一行都没跑：
+    # 上个脚本的残留进程还占着端口时，套件看起来全绿，其实漏测。
+    # 现在 `start_server` 会往后找一个空端口，测试照跑不误。
     if not ports_free(PORT):
-        print(f"端口被占用（{describe_busy(PORT)}）—— 跳过"
-              "（可能有上次的测试进程没退出）")
-        return 0
+        print(f"端口 {PORT} 被占用（{describe_busy(PORT)}）—— 换一个端口继续跑")
 
     home = Path(tempfile.mkdtemp())
     skill_dir = home / "skills" / "probe-skill"
@@ -88,17 +90,20 @@ def main() -> int:
         SKILL_MD.replace("probe-skill", "other-skill"), encoding="utf-8")
 
     server = start_server(PORT, home, TOKEN)
+
+
+    srv_port = current_port(PORT)
     try:
-        if not wait_ready(PORT):
+        if not wait_ready(srv_port):
             print("服务没起来")
             return 1
 
         r = Result()
-        names = _skill_names(PORT)
+        names = _skill_names(srv_port)
         r.check("装好后技能在清单里", "probe-skill" in names, str(names))
 
         # ── 界面上的「停用」按钮：真点一次 ────────────────────────
-        probe = run_probe(PORT, CDP_PORT, """(async () => {
+        probe = run_probe(srv_port, CDP_PORT, """(async () => {
             const sleep = ms => new Promise(r => setTimeout(r, ms));
             await window.__openExtensionsTab();
             // 等扩展表格**渲染出来** —— 它是异步的（要拉 /api/extensions）。
@@ -124,20 +129,20 @@ def main() -> int:
                 str(probe.get("rows", ""))[:200])
 
         # ── 停用后：技能目录里它没了，另一个不受影响 ────────────────
-        after = _skill_names(PORT)
+        after = _skill_names(srv_port)
         r.check("停用后技能从技能清单里消失", "probe-skill" not in after,
                 str(after))
         r.check("没停用的技能不受影响", "other-skill" in after, str(after))
 
         # 扩展总览里它标成了停用
-        overview = _api(PORT, "/api/extensions")
+        overview = _api(srv_port, "/api/extensions")
         recs = overview.get("extensions", [])
         rec = next((x for x in recs if x.get("id") == "probe-skill"), None)
         r.check("扩展总览里它标成了停用",
                 bool(rec) and bool(rec.get("disabled")), str(rec)[:200])
 
         # ── 恢复：点「启用」 ──────────────────────────────────────
-        probe2 = run_probe(PORT, CDP_PORT, """(async () => {
+        probe2 = run_probe(srv_port, CDP_PORT, """(async () => {
             const sleep = ms => new Promise(r => setTimeout(r, ms));
             await window.__openExtensionsTab();
             // 等扩展表格**渲染出来** —— 它是异步的（要拉 /api/extensions）。
@@ -153,7 +158,7 @@ def main() -> int:
         })()""")
         r.check("扩展清单里找得到它（恢复时）", bool(probe2.get("found")))
 
-        restored = _skill_names(PORT)
+        restored = _skill_names(srv_port)
         r.check("启用后技能回到清单里", "probe-skill" in restored, str(restored))
 
         return r.summary()

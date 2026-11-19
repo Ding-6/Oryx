@@ -17,6 +17,30 @@
     --chat-col: 880px;
     --chat-gutter: 24px;
   }
+  /* 顶栏左侧的视图切换 —— 设计稿那一排胶囊 tab */
+  .viewtabs {
+    display:flex; align-items:center; gap:3px;
+    flex:0 0 auto;
+    margin-right:6px;
+  }
+  .viewtabs .vtab {
+    display:flex; align-items:center; gap:5px;
+    border:0; background:transparent; cursor:pointer;
+    color:var(--muted); font-size:12.5px; font-weight:500;
+    padding:6px 12px; border-radius:999px;
+    white-space:nowrap;
+    transition:color .15s, background .15s;
+  }
+  .viewtabs .vtab svg {
+    width:14px; height:14px; flex:0 0 14px;
+    fill:none; stroke:currentColor; stroke-width:1.8;
+    stroke-linecap:round; stroke-linejoin:round;
+  }
+  .viewtabs .vtab:hover { color:var(--ink); background:var(--panel-2); }
+  .viewtabs .vtab.on {
+    background:var(--accent-soft); color:var(--accent); font-weight:600;
+  }
+
   .topbar {
     display:flex; align-items:center; gap:7px;
     padding:10px 10px;
@@ -24,7 +48,27 @@
     background:var(--bg-2);
     flex-wrap:nowrap;
   }
-  .topbar h1 { font-size:14.5px; margin:0; font-weight:600; letter-spacing:-.2px; white-space:nowrap; }
+  .topbar h1 { font-size:15px; margin:0; font-weight:700; letter-spacing:-.3px; white-space:nowrap; color:var(--ink); }
+  /* 顶栏里的图标按钮（团队、对话设置…）
+     —— 以前**根本没有 .topbar .tbtn 这条规则**，
+     顶栏的按钮一直用的是浏览器默认外观（灰底方角），
+     和旁边的胶囊控件完全不是一个东西。 */
+  .topbar .tbtn {
+    display:flex; align-items:center; gap:6px;
+    border:1px solid var(--line-strong); background:var(--bg-2);
+    border-radius:var(--r);
+    padding:5px 10px; cursor:pointer;
+    font-size:12.5px; font-weight:500; color:var(--ink-2);
+    white-space:nowrap; flex:0 0 auto;
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  .topbar .tbtn:hover { border-color:var(--accent); color:var(--accent); }
+  .topbar .tbtn svg {
+    width:15px; height:15px; flex:0 0 15px;
+    fill:none; stroke:currentColor; stroke-width:1.8;
+    stroke-linecap:round; stroke-linejoin:round;
+  }
+
   .topbar .sub {
     font-family:var(--font-mono);
     font-size:10.5px; color:var(--muted);
@@ -104,53 +148,102 @@
     padding:32px 0 18px;
   }
 
-  /* 空会话引导卡 —— 按三种权限姿态给「明确的下一步」 */
+  /* ══════════ 欢迎页 ══════════
+     按设计稿重做：**不留卡片外壳** ——
+     问候语和插画直接站在渐变底上，下面一排功能卡。
+
+     以前整个引导区是一张白卡片（`.whead` + 两组示例问题），
+     像个「说明面板」；设计稿要的是**欢迎页**：
+     大标题打招呼 + 插画 + 四个能直接点的功能入口。 */
   .welcome {
-    max-width:760px; margin:6px auto 0;
-    padding:26px 28px 22px;
-    background:var(--card);
-    border:1px solid var(--line);
-    border-radius:var(--r-lg);
-    box-shadow:var(--shadow-md);
+    max-width:1000px; margin:0 auto;
+    padding:8px 0 0;
     animation:rise var(--dur-slow) var(--ease) both;
   }
-  .welcome .whead { display:flex; gap:14px; align-items:flex-start; margin-bottom:24px; }
-  .welcome .wlogo {
-    width:38px; height:38px; flex:0 0 38px;
+  /* 上半：左边问候，右边插画 */
+  .welcome .whero {
+    display:flex; align-items:center; gap:24px;
+    margin-bottom:26px;
+  }
+  .welcome .wtext { flex:1 1 auto; min-width:0; }
+  .welcome .wtext h2 {
+    margin:0 0 10px;
+    font-size:34px; font-weight:750; letter-spacing:-1px;
+    color:var(--ink); line-height:1.2;
+  }
+  .welcome .wtext .wave { display:inline-block; font-size:30px; }
+  .welcome .wtext p {
+    margin:0; font-size:15px; color:var(--ink-2);
+    line-height:1.75; font-weight:500;
+  }
+  .welcome .wrename {
+    margin-top:14px; border:1px solid var(--line);
+    background:var(--card); color:var(--muted);
+    font-size:var(--fs-xs); padding:4px 12px;
+    border-radius:999px; cursor:pointer;
+    transition:color var(--dur-fast) ease, border-color var(--dur-fast) ease;
+  }
+  .welcome .wrename:hover { color:var(--accent); border-color:var(--accent-line); }
+  .welcome .wheroart { flex:0 0 auto; }
+  .welcome .wheroart img {
+    width:300px; height:300px; object-fit:contain;
+    /* 白底已经被 scripts/cutout_white.py 抠成透明了 ——
+       这里不需要 mix-blend-mode（它会被祖先的层叠上下文挡住）。 */
+    filter:drop-shadow(0 10px 24px rgba(99,102,241,.14));
+  }
+  [data-theme="dark"] .welcome .wheroart img {
+    /* 暗色下 multiply 会让图全黑 —— 换成普通叠加 + 提亮 */
+    filter:drop-shadow(0 10px 24px rgba(0,0,0,.5)) brightness(1.08);
+  }
+
+  /* 下半：四张功能卡 */
+  .welcome .wacts {
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+    gap:12px; margin-bottom:18px;
+  }
+  .welcome .wact {
+    display:flex; align-items:center; gap:11px;
+    text-align:left; padding:14px 14px;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:14px; cursor:pointer;
+    box-shadow:var(--shadow);
+    transition:transform var(--dur-fast) ease, border-color var(--dur-fast) ease,
+               box-shadow var(--dur-fast) ease;
+  }
+  .welcome .wact:hover {
+    transform:translateY(-2px);
+    border-color:var(--accent-line);
+    box-shadow:var(--shadow-md);
+  }
+  .welcome .wact-ic {
+    width:36px; height:36px; flex:0 0 36px;
     display:grid; place-items:center;
-    border-radius:12px;
-    background:var(--accent); color:var(--on-accent);
-    font-size:13px; font-weight:700; letter-spacing:.5px;
+    border-radius:11px;
   }
-  .welcome .whead h2 { margin:2px 0 6px; font-size:var(--fs-lg); font-weight:650; letter-spacing:-.2px; }
-  .welcome .whead p { margin:0; font-size:var(--fs-sm); color:var(--ink-2); line-height:1.7; }
-  .welcome .wgroup { margin-bottom:18px; }
-  .welcome .wgtitle { display:flex; align-items:center; gap:10px; margin-bottom:9px; flex-wrap:wrap; }
-  .welcome .wgtag {
-    font-size:var(--fs-xs); font-weight:650; padding:2px 9px; border-radius:999px;
-    background:var(--accent-soft); color:var(--accent);
+  .welcome .wact-ic svg {
+    width:18px; height:18px; fill:none; stroke:currentColor;
+    stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;
   }
-  .welcome .wgtag.plan { background:var(--warn-soft, var(--panel-2)); color:var(--warn, var(--ink-2)); }
-  .welcome .wgtag.ask { background:var(--panel-2); color:var(--muted); }
-  .welcome .wghint { font-size:var(--fs-xs); color:var(--muted); }
-  .welcome .wcards { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:8px; }
-  .welcome .wcard {
-    display:flex; align-items:center; justify-content:space-between; gap:8px;
-    text-align:left; padding:10px 12px;
-    font-size:var(--fs-sm); color:var(--ink);
-    background:var(--bg-2); border:1px solid var(--line);
-    border-radius:var(--r); cursor:pointer;
-    transition:border-color var(--dur-fast) ease, transform var(--dur-fast) ease, background var(--dur-fast) ease;
+  /* 四个卡片四种色 —— 设计稿里图标块是紫 / 蓝 / 绿 / 橙 */
+  .welcome .wact-ic.a { background:var(--tint-a-bg); color:var(--tint-a-fg); }
+  .welcome .wact-ic.b { background:var(--tint-b-bg); color:var(--tint-b-fg); }
+  .welcome .wact-ic.c { background:var(--tint-c-bg); color:var(--tint-c-fg); }
+  .welcome .wact-ic.d { background:var(--tint-d-bg); color:var(--tint-d-fg); }
+  .welcome .wact-tx { display:flex; flex-direction:column; min-width:0; flex:1 1 auto; }
+  .welcome .wact-tx b { font-size:13.5px; font-weight:650; color:var(--ink); letter-spacing:-.1px; }
+  .welcome .wact-tx i {
+    font-style:normal; font-size:var(--fs-xs); color:var(--muted); margin-top:2px;
   }
-  .welcome .wcard:hover {
-    border-color:var(--accent-line); background:var(--panel-2);
-    transform:translateY(-1px);
+  .welcome .wact-go {
+    flex:0 0 auto; color:var(--muted); font-size:17px; line-height:1;
+    transition:transform var(--dur-fast) ease, color var(--dur-fast) ease;
   }
-  .welcome .wcard .wgo { color:var(--muted); font-size:13px; flex:0 0 auto; }
-  .welcome .wcard:hover .wgo { color:var(--accent); }
+  .welcome .wact:hover .wact-go { color:var(--accent); transform:translateX(2px); }
+
   .welcome .wfoot {
-    margin-top:20px; padding-top:14px; border-top:1px solid var(--line);
     font-size:var(--fs-xs); color:var(--muted); line-height:1.7;
+    text-align:center;
   }
 
   /* 对话消息 */
@@ -486,13 +579,35 @@
     margin-left:var(--chat-gutter);
     background:var(--card);
     border:1px solid var(--line);
-    border-radius:var(--r-lg);
-    padding:12px 14px;
-    box-shadow:var(--shadow-md);
+    /* **大圆角卡片** —— 设计稿的输入框是一张独立的浮层，
+       不是「一个带边框的文本框」。圆角 20px + 柔和投影。 */
+    border-radius:20px;
+    padding:0 16px 12px;
+    box-shadow:0 8px 28px -12px rgba(60,50,140,.18);
     position:relative;
     transition:border-color .2s, box-shadow .2s;
   }
-  .cbox:focus-within { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  .cbox:focus-within { border-color:var(--accent-line); box-shadow:0 10px 34px -12px rgba(99,102,241,.28); }
+
+  /* 场景预设 tab —— 设计稿输入框顶部那一行 */
+  .scenes {
+    display:flex; align-items:center; gap:4px;
+    padding:12px 0 10px;
+    border-bottom:1px solid var(--line);
+    margin-bottom:2px;
+  }
+  .scenes .scene {
+    border:0; background:transparent; cursor:pointer;
+    color:var(--muted); font-size:12.5px; font-weight:500;
+    padding:5px 11px; border-radius:999px;
+    display:flex; align-items:center; gap:5px;
+    white-space:nowrap;
+    transition:color .15s, background .15s;
+  }
+  .scenes .scene:hover { color:var(--ink); background:var(--panel-2); }
+  .scenes .scene.on {
+    background:var(--accent-soft); color:var(--accent); font-weight:600;
+  }
   #input {
     width:100%;
     border:0; background:transparent; outline:none;
@@ -513,11 +628,12 @@
   .crow > .spacer { flex:0 0 0; }
   .sendbtn { flex:0 0 auto; margin-bottom:2px; }
   .sendbtn {
-    width:34px; height:34px;
-    border-radius:50%;
+    /* 设计稿是**紫色圆形**发送键 —— 不是方的，
+       也不是浅蓝，是偏紫的渐变（和「新建对话」胶囊同一套色）。 */
+    width:38px; height:38px; border-radius:50%;
     border:0;
-    background:var(--accent);
-    color:var(--on-accent);
+    background:linear-gradient(135deg, var(--brand-1) 0%, var(--brand-2) 100%);
+    color:var(--on-brand);
     cursor:pointer;
     display:grid; place-items:center;
     margin-left:auto;

@@ -22,8 +22,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _webcheck import describe_busy, ports_free  # noqa: E402
-from _webdrive import (Result, install_ui_ext, run_probe,  # noqa: E402
-                        start_server, stop_server, wait_ready)
+from _webdrive import (Result, current_port, install_ui_ext,  # noqa: E402
+                        run_probe, start_server, stop_server, wait_ready)
 
 PORT = 8782
 CDP_PORT = 9345
@@ -48,10 +48,12 @@ def _api(port: int, path: str) -> dict:
 
 
 def main() -> int:
+    # 端口被占用**不再跳过**。
+    # 以前这里直接 return 0 —— 测试「通过」了，但实际一行都没跑：
+    # 上个脚本的残留进程还占着端口时，套件看起来全绿，其实漏测。
+    # 现在 `start_server` 会往后找一个空端口，测试照跑不误。
     if not ports_free(PORT):
-        print(f"端口被占用（{describe_busy(PORT)}）—— 跳过"
-              "（可能有上次的测试进程没退出）")
-        return 0
+        print(f"端口 {PORT} 被占用（{describe_busy(PORT)}）—— 换一个端口继续跑")
 
     home = Path(tempfile.mkdtemp())
     ext = home / "extensions" / "settings-ext"
@@ -68,15 +70,18 @@ def main() -> int:
                     "caps": ["fs.read"]}, UI_PANEL_JS)
 
     server = start_server(PORT, home, TOKEN)
+
+
+    srv_port = current_port(PORT)
     try:
-        if not wait_ready(PORT):
+        if not wait_ready(srv_port):
             print("服务没起来")
             return 1
 
         r = Result()
 
         # ── 设置页结构 ────────────────────────────────────────────
-        probe = run_probe(PORT, CDP_PORT, """(async () => {
+        probe = run_probe(srv_port, CDP_PORT, """(async () => {
             const sleep = ms => new Promise(r => setTimeout(r, ms));
             const ok = await window.__openExtensionsTab();
             const body = document.body.innerText || '';
@@ -134,7 +139,7 @@ def main() -> int:
         # ── 能力速查表 ──────────────────────────────────────────────
         # <details> 收起时内容是 display:none —— innerText 读不到，
         # 所以先展开再读，验的是**用户真能看见**的状态。
-        probe2 = run_probe(PORT, CDP_PORT, """(async () => {
+        probe2 = run_probe(srv_port, CDP_PORT, """(async () => {
             const sleep = ms => new Promise(r => setTimeout(r, ms));
             await window.__openExtensionsTab();
             for (let i = 0; i < 20; i++) {
@@ -166,7 +171,7 @@ def main() -> int:
         # ── 启停：状态变了 → 有提示 → 能恢复 ──────────────────────
         # 表格是**异步渲染**的（新页面打开设置页 → 拉数据 → 重画），
         # 所以一律轮询等按钮出现，别赌固定等待时长。
-        probe2 = run_probe(PORT, CDP_PORT, """(async () => {
+        probe2 = run_probe(srv_port, CDP_PORT, """(async () => {
             const sleep = ms => new Promise(r => setTimeout(r, ms));
             await window.__openExtensionsTab();
             let btn = null;
@@ -187,14 +192,14 @@ def main() -> int:
         r.check("点启停有提示", bool(str(probe2.get("note", "")).strip()),
                 str(probe2.get("note", "")))
 
-        overview = _api(PORT, "/api/extensions")
+        overview = _api(srv_port, "/api/extensions")
         rec = next((x for x in overview.get("extensions", [])
                     if x.get("id") == "settings-ext"), None)
         r.check("启停后状态真的变了", bool(rec) and bool(rec.get("disabled")),
                 str(rec)[:160])
 
         # 恢复原状 —— 别污染后续测试
-        probe3 = run_probe(PORT, CDP_PORT, """(async () => {
+        probe3 = run_probe(srv_port, CDP_PORT, """(async () => {
             const sleep = ms => new Promise(r => setTimeout(r, ms));
             await window.__openExtensionsTab();
             let btn = null;
@@ -209,14 +214,14 @@ def main() -> int:
             return {found: true};
         })()""")
         r.check("能再点回来", bool(probe3.get("found")))
-        overview2 = _api(PORT, "/api/extensions")
+        overview2 = _api(srv_port, "/api/extensions")
         rec2 = next((x for x in overview2.get("extensions", [])
                      if x.get("id") == "settings-ext"), None)
         r.check("恢复后不再是停用状态",
                 bool(rec2) and not rec2.get("disabled"), str(rec2)[:160])
 
         # ── 重新加载 ──────────────────────────────────────────────
-        probe4 = run_probe(PORT, CDP_PORT, """(async () => {
+        probe4 = run_probe(srv_port, CDP_PORT, """(async () => {
             const sleep = ms => new Promise(r => setTimeout(r, ms));
             await window.__openExtensionsTab();
             const btn = document.querySelector('#extReload');
@@ -240,7 +245,7 @@ def main() -> int:
         # 留着不管的话，同一次运行后面的检查会被带偏。
         try:
             req = urllib.request.Request(
-                f"http://127.0.0.1:{PORT}/api/extensions/settings-ext/enable",
+                f"http://127.0.0.1:{srv_port}/api/extensions/settings-ext/enable",
                 headers={"X-Oryx-Token": TOKEN, "X-Oryx-Request": "1"},
                 method="POST", data=b"")
             urllib.request.urlopen(req, timeout=10).read()

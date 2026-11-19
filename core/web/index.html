@@ -25,9 +25,9 @@
    <div class="railcard">
     <div class="railhead">
       <div class="logo">
-        <span>Ory<em>x</em></span>
-        <span class="tag">本地 Agent</span>
-        <span class="live" id="live"></span>
+        <span class="lmark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.4l2.35 6.6 6.6 2.35-6.6 2.35L12 20.3l-2.35-6.6L3.05 11.35l6.6-2.35z"/></svg></span>
+        <span class="ltxt"><b>Oryx</b><i>AI Engineer Mentor</i></span>
+        <span class="live" id="live" title="内核连接状态"></span>
       </div>
       <div class="search">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
@@ -37,8 +37,10 @@
     </div>
 
     <div class="railnav">
+      <!-- 「新建对话」是**动作**，不是「当前在哪个页面」——
+           所以它独立成一条紫色胶囊，放在导航列表上方。 -->
+      <div class="navitem newchat" role="button" tabindex="0" data-view="chat" aria-selected="true"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4 20l1.8-4.6A7.5 7.5 0 1 1 20 11.5z"/></svg><span>新建对话</span></div>
     <div class="nav" role="tablist" aria-label="主导航">
-      <div class="navitem newchat" role="button" tabindex="0" data-view="chat" aria-selected="true"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4 20l1.8-4.6A7.5 7.5 0 1 1 20 11.5z"/></svg>新建对话</div>
       <div class="navitem" role="tab" tabindex="0" aria-selected="false" data-view="work"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>工作台</div>
       <div class="navitem" role="tab" tabindex="0" aria-selected="false" data-view="market"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 1 5.4-5.4z"/></svg>技能广场</div>
       <div class="navitem" role="tab" tabindex="0" aria-selected="false" data-view="automations"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>自动任务<span class="cnt" id="autoCnt"></span></div>
@@ -58,8 +60,9 @@
     </div>
 
     <div class="railgroup">
-      <div class="gt">对话<span class="tw" id="sessCnt"></span></div>
+      <div class="gt"><span>对话历史</span><span class="tw" id="sessCnt"></span><button class="gtmore" id="sessMore" title="更多会话" aria-label="更多会话" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
       <div id="sessList"><div class="empty">还没有对话</div></div>
+      <button class="seeall" id="sessAll" type="button">查看更多<span aria-hidden="true">›</span></button>
     </div>
 
     <div class="railfoot">
@@ -81,22 +84,51 @@
   <!-- ══ 主区 ══ -->
   <section id="center">
     <div class="topbar">
+      <!-- 视图快捷切换 —— 设计稿顶栏左侧那一排胶囊 tab。
+           映射到项目里对应的页面/面板：
+           对话 → 会话页；工作流 → 工作流页；
+           知识库 → 本地资料里的知识库；插件 → 技能与扩展页 -->
+      <div class="viewtabs" id="viewTabs" role="tablist" aria-label="视图切换">
+        <button class="vtab on" data-vt="chat" role="tab" aria-selected="true" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4 20l1.8-4.6A7.5 7.5 0 1 1 20 11.5z"/></svg>对话</button>
+        <button class="vtab" data-vt="workflows" role="tab" aria-selected="false" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.5"/><circle cx="18" cy="5" r="2.5"/><circle cx="12" cy="19" r="2.5"/><path d="M6 7.5v2a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v1"/></svg>工作流</button>
+        <button class="vtab" data-vt="kb" role="tab" aria-selected="false" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>知识库</button>
+        <button class="vtab" data-vt="plugins" role="tab" aria-selected="false" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 1 5.4-5.4z"/></svg>插件</button>
+      </div>
       <h1 id="pageTitle">新对话</h1>
       <span class="sub" id="pageSub"></span>
       <div class="spacer"></div>
       <button class="tbtn" id="teamBtn" title="多 Agent 团队" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9" r="2.4"/><path d="M14.5 19a4.6 4.6 0 0 1 6-4"/></svg><span>团队</span></button>
-      <div class="seg" id="interSeg">
-        <button data-i="ask" type="button">问答</button><button data-i="plan" type="button">规划</button><button data-i="craft" class="on" type="button">执行</button>
+      <!-- 对话参数（人设 / 风格 / 计算模式 / 交互模式）
+           收进「⚙」下拉 —— 设计稿的顶栏只有「模型 + 图标」，
+           四个下拉平铺会把整行塞满，模型名都被挤没了。
+           控件的 id 全部保留（JS 读写的是它们），只是换了摆放位置。 -->
+      <div class="topmore" id="topMore">
+        <button class="tbtn" id="topMoreDrop" title="对话设置（人设 / 风格 / 模式）" aria-label="对话设置" aria-expanded="false" aria-controls="topMorePop" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8 1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>
+        </button>
+        <div class="topmore-pop" id="topMorePop" hidden>
+          <div class="tmrow"><span class="tmlabel">人设</span><select class="btn" id="expertSel" title="人设 / 场景角色" aria-label="选择人设或场景角色"><option value="">无专家</option></select></div>
+          <div class="tmrow"><span class="tmlabel">回答风格</span><select class="btn" id="styleSel" title="回答风格" aria-label="选择回答风格"><option value="professional">专业</option></select></div>
+          <div class="tmrow"><span class="tmlabel">计算模式</span><select class="btn" id="modeSel" title="计算模式" aria-label="选择计算模式"><option value="efficiency">效率</option><option value="local">本地</option></select></div>
+          <div class="tmrow"><span class="tmlabel">交互模式</span><div class="seg" id="interSeg">
+            <button data-i="ask" type="button">问答</button><button data-i="plan" type="button">规划</button><button data-i="craft" class="on" type="button">执行</button>
+          </div></div>
+        </div>
       </div>
-      <select class="btn" id="expertSel" title="人设 / 场景角色" aria-label="选择人设或场景角色"><option value="">无专家</option></select>
-      <select class="btn" id="styleSel" title="回答风格" aria-label="选择回答风格"><option value="professional">专业</option></select>
-      <select class="btn" id="modeSel" title="计算模式" aria-label="选择计算模式"><option value="efficiency">效率</option><option value="local">本地</option></select>
-      <button class="chip modelpick" id="modelChip" title="切换模型服务" type="button">—</button>
-      <!-- 窄屏时上面几个选择器会被隐藏（放不下），这个按钮是它们的替代入口。
-           没有它的话，窄屏用户**根本没法切换模式/风格/人设/模型**。 -->
-      <button class="tbtn topfitonly" id="topMoreBtn" title="更多设置（模式 / 风格 / 人设 / 模型）" aria-label="更多设置" type="button">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      <button class="chip modelpick" id="modelChip" title="切换模型服务" type="button">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18M3.5 9h17M3.5 15h17"/></svg>
+        <span id="modelChipText">—</span>
+        <svg class="caret" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
       </button>
+      <!-- 主题切换（明/暗）—— 设计稿右上角那颗太阳 -->
+      <button class="iconbtn" id="themeBtn" title="切换主题（明/暗）" aria-label="切换主题" type="button">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.6M12 19.4V22M2 12h2.6M19.4 12H22M4.9 4.9l1.9 1.9M17.2 17.2l1.9 1.9M19.1 4.9l-1.9 1.9M6.8 17.2l-1.9 1.9"/></svg>
+      </button>
+
     </div>
 
     <div id="scroll"><div class="wrap" id="messages"></div></div>
@@ -105,14 +137,21 @@
       <div class="attbar" id="attbar"></div>
       <div class="modehint" id="modeHint"></div>
       <div class="cbox">
-        <textarea id="input" placeholder="请输入任务，交给我来帮我完成（Enter 发送，Shift+Enter 换行）" aria-label="任务输入框，输入要交给 Oryx 完成的事"></textarea>
+        <!-- 场景预设：一键切「这一轮用什么能力」。
+             每个预设 = 交互模式 + 自动带上相关技能。 -->
+        <div class="scenes" id="sceneBar" role="tablist" aria-label="场景预设">
+          <button class="scene on" data-scene="chat" role="tab" aria-selected="true" type="button">对话</button>
+          <button class="scene" data-scene="web" role="tab" aria-selected="false" type="button">联网搜索</button>
+          <button class="scene" data-scene="kb" role="tab" aria-selected="false" type="button">知识检索</button>
+          <button class="scene" data-scene="code" role="tab" aria-selected="false" type="button">代码执行</button>
+        </div>
+        <textarea id="input" placeholder="请输入你的问题，或选择一个功能开始..." aria-label="任务输入框，输入要交给 Oryx 完成的事"></textarea>
         <div class="crow">
           <div class="chipsbar" id="chipsBar">
-            <button class="tbtn" id="optBtn" title="优化这句表达" aria-label="优化这句表达" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span>优化</span></button>
-            <button class="tbtn" id="fileBtn" title="选择要交给 Oryx 的文件" aria-label="选择要交给 Oryx 的文件" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>选择文件</span></button>
+            <button class="tbtn" id="fileBtn" title="选择要交给 Oryx 的文件" aria-label="选择要交给 Oryx 的文件" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M21 15l-5-5L5 20"/><path d="M19 5H9a3 3 0 0 0 0 6h8a3 3 0 0 1 0 6H7"/></svg><span>上传文件</span></button>
             <button class="tbtn" id="pasteBtn" title="粘贴导入：截图、文本、文件" aria-label="粘贴导入内容" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4h6v3H9z"/><path d="M9 11h6M9 15h4"/></svg><span>粘贴导入</span></button>
-            <button class="tbtn" id="permBtn" title="设置本轮默认权限" aria-label="设置本轮默认权限" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg><span>默认权限</span></button>
-            <button class="tbtn" id="skillBtn" title="为这一轮绑定技能" aria-label="为这一轮绑定技能" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h14v5H5zM5 13h9v7H5zM17 13h2v7h-2z"/></svg><span>调用技能</span></button>
+            <button class="tbtn" id="skillBtn" title="为这一轮绑定技能" aria-label="为这一轮绑定技能" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0 0 6v1a4 4 0 0 0 8 0v-1a3 3 0 0 0 0-6V7a4 4 0 0 0-4-4z"/></svg><span>连接知识库</span></button>
+            <button class="tbtn" id="moreBtn" title="更多设置：优化表达、调用技能、默认权限" aria-label="更多设置" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 .3 1.8 1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg><span>更多设置</span></button>
           </div>
           <button class="chiptoggle" id="chipToggle" title="折叠/展开" aria-label="折叠或展开工具芯片" aria-expanded="true" aria-controls="chipsBar" type="button">
             <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
@@ -120,7 +159,7 @@
           </button>
           <div class="spacer"></div>
           <button class="sendbtn" id="sendBtn" title="发送" aria-label="发送任务" type="button">
-            <svg id="sendIcon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            <svg id="sendIcon" aria-hidden="true" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
           </button>
         </div>
       </div>
@@ -130,7 +169,59 @@
 
   <!-- ══ 右栏 ══ -->
   <aside id="side">
+    <!-- 右栏两个视图：**助手**（默认：快捷功能 + 最近对话）
+         与 **执行**（运行时过程面板）。设计稿只画了前者，
+         但执行过程是核心功能，不能因为换皮丢掉 —— 所以做成可切换。 -->
     <div class="stabs">
+      <button class="stview-tab on" data-sv="assist" type="button">快捷</button>
+      <button class="stview-tab" data-sv="run" type="button">执行</button>
+      <button class="stcollapse" id="sideCollapse" title="收起右栏" aria-label="收起右栏" aria-controls="side" aria-expanded="true" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 6l6 6-6 6"/></svg></button>
+    </div>
+    <div class="sbody">
+      <!-- ══ 助手视图 ══ -->
+      <div class="sview on" id="sv-assist">
+        <div class="scard">
+          <div class="scard-hd">
+            <span class="scard-ic bolt" aria-hidden="true">⚡</span>
+            <b>快捷功能</b>
+            <button class="scard-more" data-more="quick" type="button">更多<span aria-hidden="true">›</span></button>
+          </div>
+          <div class="squick">
+            <button class="sq" data-sq="files" type="button">
+              <span class="sq-ic a" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 9h8M8 13h5"/></svg></span>
+              <span class="sq-tx"><b>文件解析</b><i>解析多种格式文件</i></span>
+              <span class="sq-go" aria-hidden="true">›</span>
+            </button>
+            <button class="sq" data-sq="kb" type="button">
+              <span class="sq-ic b" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></span>
+              <span class="sq-tx"><b>RAG 检索</b><i>基于知识库问答</i></span>
+              <span class="sq-go" aria-hidden="true">›</span>
+            </button>
+            <button class="sq" data-sq="code" type="button">
+              <span class="sq-ic c" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 18l-6-6 6-6M15 6l6 6-6 6"/></svg></span>
+              <span class="sq-tx"><b>代码生成</b><i>生成或调试代码</i></span>
+              <span class="sq-go" aria-hidden="true">›</span>
+            </button>
+            <button class="sq" data-sq="wf" type="button">
+              <span class="sq-ic d" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.5"/><circle cx="18" cy="5" r="2.5"/><circle cx="12" cy="19" r="2.5"/><path d="M6 7.5v2a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v1"/></svg></span>
+              <span class="sq-tx"><b>工作流编排</b><i>构建自动化流程</i></span>
+              <span class="sq-go" aria-hidden="true">›</span>
+            </button>
+          </div>
+        </div>
+        <div class="scard">
+          <div class="scard-hd">
+            <span class="scard-ic talk" aria-hidden="true">💬</span>
+            <b>最近对话</b>
+            <button class="scard-more" data-more="recent" type="button">全部<span aria-hidden="true">›</span></button>
+          </div>
+          <div id="sideRecent" class="srecent"><div class="empty">还没有对话</div></div>
+        </div>
+      </div>
+
+      <!-- ══ 执行视图 ══ -->
+      <div class="sview" id="sv-run">
+      <div class="stabs sub" id="runTabs">
       <button data-p="overview" type="button" title="多 Agent / 工作流一屏总览">总览</button>
       <button data-p="steps" class="on" type="button">执行</button>
       <button data-p="todos" type="button">任务</button>
@@ -138,9 +229,7 @@
       <button data-p="term" type="button">终端</button>
       <button data-p="files" type="button">产物</button>
       <button data-p="detail" type="button">详情</button>
-      <button class="stcollapse" id="sideCollapse" title="收起右栏" aria-label="收起右栏" aria-controls="side" aria-expanded="true" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 6l6 6-6 6"/></svg></button>
     </div>
-    <div class="sbody">
       <!-- 能力降级提示：向量检索退回关键词 / OCR 引擎缺失等，
            以前都是静默发生，用户以为自己在用完整能力 -->
       <div id="degradeBar"></div>
@@ -157,6 +246,7 @@
       </div>
       <div class="pane" id="p-files"><div class="empty">还没有产物</div></div>
       <div class="pane" id="p-detail"><div class="empty">打开一个会话后这里显示用量与审计</div></div>
+      </div>
     </div>
     <div class="rz" id="sideRz" title="拖动调整宽度，或用左右方向键" role="separator" aria-orientation="vertical" aria-label="调整右栏宽度" tabindex="0" aria-valuemin="200" aria-valuemax="540" aria-valuenow="224"></div>
   </aside>

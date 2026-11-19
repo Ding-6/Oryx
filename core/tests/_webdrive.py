@@ -73,7 +73,6 @@ def _wait_port_free(port: int, timeout: float = 30.0) -> None:
     30 秒：Chrome 的子进程退出很慢（实测残留 20 个 msedge，
     一些还在退出过程中），端口短时间内还占着。
     """
-    """等端口释放 —— 不然下一个探针会撞上。"""
     deadline = time.time() + timeout
     while time.time() < deadline:
         if not port_in_use(port):
@@ -278,18 +277,33 @@ def find_chrome() -> str | None:
     return fc()
 
 
+def _ping(port: int, timeout: float = 2.0) -> bool:
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/ping", timeout=timeout
+        ) as r:
+            return bool(r.read())
+    except Exception:
+        return False
+
+
 def wait_ready(port: int, timeout: float = 40.0) -> bool:
-    """等服务起来。"""
+    """等服务起来。
+
+    端口被占时 `start_server` 会往后挪一个 —— 所以这里也要能认出
+    「服务其实起在隔壁端口」。但**原端口优先**：
+    不冲突时它就是对的，一 ping 就通；
+    真要往后扫，也得**每个只等 0.3 秒** ——
+    20 个端口各等 2 秒的话，一轮就 40 秒，总超时根本不够用。
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/api/ping", timeout=3
-            ) as r:
-                if r.read():
-                    return True
-        except Exception:
-            time.sleep(0.5)
+        if _ping(port):
+            return True
+        for p in range(port + 1, port + 20):
+            if _ping(p, timeout=0.3):
+                return True
+        time.sleep(0.4)
     return False
 
 
@@ -539,16 +553,65 @@ def run_probe(port: int, cdp_port: int | None = None, expression: str = "",
         _probe(chosen, f"http://127.0.0.1:{port}/", expression, wait))
 
 
+def _port_busy(port: int) -> bool:
+    """这个端口有没有人占。"""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sk:
+        sk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sk.bind(("127.0.0.1", port))
+        except OSError:
+            return True
+    return False
+
+
+_LAST_PORT = 0
+
+
+def current_port(preferred: int) -> int:
+    """服务**实际**用的端口。
+
+    `start_server` 在端口被占时会往后挪 —— 挪完的端口记在这里，
+    各脚本访问服务时要用它，不能还用自己写死的那一个。
+    """
+    return _LAST_PORT or preferred
+
+
 def start_server(port: int, home: Path, token: str):
-    """起一个 Oryx 服务（独立配置目录，不碰用户配置）。"""
+    """起一个 Oryx 服务（独立配置目录，不碰用户配置）。
+
+    端口被占时**自动往后找一个空端口**。
+    ------------------------------------------------
+    以前端口写死在每个脚本里，加新脚本就可能跟老的撞上。
+    撞上的后果很误导人：脚本报「服务没起来」，
+    看起来像代码坏了，其实是**上一个脚本的残留进程**还占着端口
+    （`stop_server` 杀进程树偶尔会漏）。
+
+    现在端口只当**起点** —— 真被占了就往后挪，最多试 20 个。
+    调用方拿到的仍然是「服务起来了」这个事实。
+    """
     env = dict(os.environ)
     env["ORYX_API_TOKEN"] = token
     env["ORYX_HOME"] = str(home)
-    return subprocess.Popen(
-        [sys.executable, "-m", "oryx", "--no-browser", "--port", str(port)],
+    chosen = port
+    for _ in range(20):
+        if not _port_busy(chosen):
+            break
+        chosen += 1
+    else:
+        chosen = port
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "oryx", "--no-browser", "--port", str(chosen)],
         cwd=str(CORE), env=env,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
+    # **实际用的端口挂到进程对象上** ——
+    # 调用方要拿它去 goto / 探测。以前端口在「启动」和「访问」两处各写一遍，
+    # 一旦 start_server 挪了端口，访问还连旧的 → ERR_CONNECTION_REFUSED。
+    proc.oryx_port = chosen
+    global _LAST_PORT
+    _LAST_PORT = chosen
+    return proc
 
 
 def stop_server(server) -> None:
