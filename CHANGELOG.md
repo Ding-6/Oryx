@@ -116,6 +116,18 @@ hero 区原来吃掉近 200px 高度（56px 上边距 + 40px 标题 + 两段 mar
 新版 `include_router` 把子路由收进一个 `_IncludedRouter` 对象，
 **直接遍历 `app.routes` 看不到它们**。改用 `app.openapi()["paths"]`。
 
+### 有了版本控制
+
+项目此前**没有 git** —— 改坏了没法回滚。从这一版起：
+881 个文件、18.3 万行进了版本库（构建产物与临时文件按 `.gitignore` 排除）。
+
+推之前扫过一遍密钥形态：命中的全是**占位符**
+（`sk-abcdefghij…`、`AKIAIOSFODNN7EXAMPLE`）——
+真配置在仓库外的 `D:/OryxData`，不含密钥。
+
+`core/tests/samples/secrets/` 里那个 `private.pem` 是**故意留的**：
+它用来验证「私钥会被整块抹掉」，不是真实凭据。
+
 ## 1.11.0 — 2026-11-10
 
 令牌不再出现在任何 JS 里，界面扩展的能力声明也真生效了。
