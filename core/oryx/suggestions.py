@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 MAX_SUGGESTIONS = 3
@@ -74,6 +75,66 @@ def _path_from(args: dict[str, Any], result: dict[str, Any]) -> str:
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return ""
+
+
+# 产物文件的后缀。
+#
+# 只有这些后缀才可能被「下一步」建议命中 —— 建议表是按后缀组织的，
+# 认出后缀就等于认出了产物。
+_ARTIFACT_SUFFIXES = frozenset({
+    ".xlsx", ".csv", ".html", ".htm", ".png", ".jpg", ".jpeg",
+    ".svg", ".docx", ".pptx", ".pdf", ".md", ".txt", ".json",
+})
+
+
+def _iter_strings(value: Any, depth: int = 0):
+    """把任意嵌套结构里的字符串都捞出来。
+
+    深度封顶 4 —— 防止自引用结构（a["self"] = a）把遍历器绕死。
+    """
+    if depth > 4:
+        return
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_strings(item, depth + 1)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _iter_strings(item, depth + 1)
+
+
+def artifact_paths(*values: Any) -> list[str]:
+    """从一堆结构里挖出**产物路径**。
+
+    为什么单独挖
+    ------------
+    产物路径藏在工具的入参/结果里，键名五花八门
+    （path / output / dest / image_path / content.path…）。
+    大屏要回答「这一轮产出了什么」，得有个统一的地方把路径捞出来，
+    而不是每个调用方各写一套取法。
+
+    两条过滤规则
+    ------------
+    1. **后缀要在已知集合里** —— 任意带 path 的参数（比如读一个源文件）
+       不是产物。
+    2. **整串不能有空白** —— 「请看 report.xlsx」是一句话，不是一个路径。
+       有空白的字符串多半是句子里顺带提了个文件名。
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for raw in _iter_strings(value):
+            path = str(raw).strip().strip('"').strip("'")
+            if not path or path in seen:
+                continue
+            if any(ch.isspace() for ch in path):
+                continue
+            if Path(path).suffix.lower() not in _ARTIFACT_SUFFIXES:
+                continue
+            seen.add(path)
+            out.append(path)
+    return out
 
 
 def suggest(

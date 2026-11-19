@@ -462,6 +462,37 @@ class Store:
             out.append(item)
         return out
 
+    def session_stats(self) -> dict[str, int]:
+        """会话计数：总数 / 进行中 / 今日。
+
+        给大屏用 —— 「一共跑过多少轮、现在有几个在跑、今天动了多少」。
+
+        这些数字**不能**让前端从列表里数：
+        列表是限量的（limit=20），数出来的是「最近 20 个里有几个在跑」，
+        跟「一共跑了多少」完全是两回事 —— 显示错了用户会以为数据丢了。
+        """
+        # 本地时间的今天零点。
+        # tm_isdst=-1 = 让系统自己判断夏令时。
+        # 注意 mktime 要的是 **9 元组**（年 月 日 时 分 秒 星期 年内第几天 夏令时），
+        # 少给几个会直接抛 TypeError。
+        now = time.localtime()
+        start_of_day = time.mktime(
+            (now.tm_year, now.tm_mon, now.tm_mday, 0, 0, 0, now.tm_wday, now.tm_yday, -1)
+        )
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total,"
+                " COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0) AS active,"
+                " COALESCE(SUM(CASE WHEN updated_at >= ? THEN 1 ELSE 0 END),0) AS today"
+                " FROM tasks",
+                (start_of_day,),
+            ).fetchone()
+        return {
+            "total": int(row["total"]),
+            "active": int(row["active"]),
+            "today": int(row["today"]),
+        }
+
     def rename_session(self, task_id: str, title: str) -> bool:
         """给会话改个名字。
 

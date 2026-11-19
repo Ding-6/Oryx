@@ -26,6 +26,7 @@ from . import (
     mcp,
     memory,
     model_config,
+    overview,
     persona,
     preference,
     remote,
@@ -63,6 +64,7 @@ DOMAINS = (
     (chat, "对话、剪贴板、粘贴、审批"),
     (app_domain, "应用安装、启动、图标、自定义应用"),
     (system, "系统状态、自检、提示词优化、环境查询"),
+    (overview, "大屏总览：编队、运行、主动建议"),
 )
 
 
@@ -94,3 +96,4 @@ def register_all(app, *, store, config, agent, bus, api_token: str = "") -> None
     chat.register(app, agent, store, config, bus)
     app_domain.register(app, agent)
     system.register(app, config, agent, store, bus)
+    overview.register(app, agent, store)
