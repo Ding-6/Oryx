@@ -48,6 +48,19 @@ export async function api(path, o = {}) {
   return fetch(path, opt);
 }
 export const esc = t => { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; };
+
+/** v2 统一响应 → 领域数据。
+ *
+ *  v2 的成功响应是 `{code, data, message}`，领域数据在 `data` 里。
+ *  还没改造的旧接口返回裸对象 —— 这个 helper 两种都吃，
+ *  迁移期不用关心哪个接口改过、哪个还没改。
+ *
+ *  数组原样返回（`data` 本身可能是数组，不能再往下剥一层）。
+ */
+export const dataOf = j => {
+  if (!j || typeof j !== 'object' || Array.isArray(j)) return j;
+  return ('data' in j) ? j.data : j;
+};
 /* 属性值专用：esc() 只转义 & < >，**不转义引号**（textContent 序列化如此）。
    所以 title="${esc(x)}" 遇到 x 里带双引号就会提前闭合属性、整个标签结构乱掉。
    塞进属性的值一律走这个。 */
@@ -190,6 +203,10 @@ export const S = {
   taskId: '',
   // 子 Agent / 管家 的 id → 中文名与图标。从后端目录拉，不写死。
   agentNames: {}, agentIcons: {}, agentSubs: {},
+  // 内核起没起来（后端 /api/state 的 kernel_ready）。
+  // 没就绪时，那些走 RPC 的接口（团队、工作流…）会 503 ——
+  // 调它们只会刷出一排控制台错误。该等内核起来再补。
+  kernelReady: true,
   teamPoll: null,
   // 检查点：这个会话可回退的位置。key 是 checkpoint id。
   checkpoints: [], cpLoadedFor: '',

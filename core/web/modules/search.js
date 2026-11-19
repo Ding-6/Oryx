@@ -4,7 +4,7 @@
  */
 
 import { openSession, setView, viewSkill } from './models.js';
-import { $, api, esc } from './core.js';
+import { $, api, dataOf, esc } from './core.js';
 
 /* ══════ 全局搜索（会话 / 技能 / 工具） ══════ */
 let searchTimer = null;
@@ -66,11 +66,11 @@ $('#search').addEventListener('input', e => {
   if (!q) { closeSearch(); return; }
   searchTimer = setTimeout(async () => {
     const [ss, sk, cp] = await Promise.all([
-      api('/api/sessions').then(r => r.json()).catch(() => ({ sessions: [] })),
+      api('/api/sessions').then(r => r.json()).then(dataOf).catch(() => []),
       api('/api/skills').then(r => r.json()).catch(() => ({ skills: [] })),
       api('/api/capabilities').then(r => r.json()).catch(() => ({ groups: [] })),
     ]);
-    renderSearchResults(q, ss.sessions || [], sk.skills || [], (cp.groups || []).flatMap(g => g.tools || []));
+    renderSearchResults(q, ss || [], sk.skills || [], (cp.groups || []).flatMap(g => g.tools || []));
   }, 220);
 });
 $('#search').addEventListener('keydown', e => {

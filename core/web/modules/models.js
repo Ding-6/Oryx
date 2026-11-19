@@ -8,7 +8,7 @@ import { hideThinking } from './events.js';
 import { _modalGen, closeModal, openModal } from './modal.js';
 import { sessGroup, sessStatus } from './session.js';
 import { applyBg, applyTheme, paintBg } from './theme.js';
-import { $, $$, DOC_STAT_CN, S, api, bus, cnAgent, cnGroup, cnSkill, cnTool, esc, escAttr, md, mut, toast } from './core.js';
+import { $, $$, DOC_STAT_CN, S, api, bus, cnAgent, cnGroup, cnSkill, cnTool, dataOf, esc, escAttr, md, mut, toast } from './core.js';
 
 /* ══════ 视图 ══════ */
 export function setView(v) {
@@ -641,8 +641,8 @@ function relTime(ts) {
 }
 
 export async function loadSessions() {
-  const d = await (await api('/api/sessions')).json();
-  S.sessions = d.sessions || [];
+  const d = dataOf(await (await api('/api/sessions')).json());
+  S.sessions = d || [];
   $('#sessCnt').textContent = S.sessions.length || '';
   const box = $('#sessList');
   // 右栏的「最近对话」是同一份数据的另一个视图 —— 一处变，两处都变
@@ -766,7 +766,7 @@ export async function openSession(id) {
   // 不认领的话，正在跑的那个任务的内容会被当成「别的任务」挡掉，
   // 用户点了历史会话就看不到正在流出的回答。
   S.taskId = id;
-  const d = await (await api(`/api/sessions/${id}`)).json();
+  const d = dataOf(await (await api(`/api/sessions/${id}`)).json());
   $('#messages').innerHTML = '';
   mut.S_REASON = null;
   // 换会话也要清时间线 —— 那是上一轮的协作记录
@@ -895,12 +895,35 @@ export async function refreshState() {
     }
     ss.value = s.style;
     paintModeHint();
+    // 内核起没起来 —— 状态从「没起来」翻成「起来了」时，
+    // 把之前因为内核没就绪而跳过的数据补上。
+    const wasReady = S.kernelReady;
+    S.kernelReady = s.kernel_ready !== false;
+    if (!wasReady && S.kernelReady) catchUpKernelData();
     // 状态变了 —— 告诉前端扩展（模式、provider、专家这些都可能变了）
     bus.emit('state:changed', {
       mode: s.mode, interaction: s.interaction, style: s.style,
       expert: s.expert || '', provider: s.provider || '', model: s.model || '',
     });
   } catch (_) {}
+}
+
+/**
+ * 内核就绪后，把「内核没起来时不该调」的数据补上。
+ *
+ * 为什么要有这个
+ * --------------
+ * 内核没就绪时，走 RPC 的接口（团队、工作流…）会返回 503。
+ * 首屏照常调它们，控制台就是一排红字 —— 用户看到的是「页面坏了」，
+ * 实际只是内核还在启动。
+ *
+ * 所以启动时先跳过，等内核就绪了再补。refreshState 每 6 秒跑一次，
+ * 状态一翻转就会自动补上。
+ */
+export async function catchUpKernelData() {
+  try { await loadTeams(); } catch (_) {}
+  try { await loadWorkflowRuns(true); } catch (_) {}
+  try { await loadWorkflowTemplates(true); } catch (_) {}
 }
 
 /* 当前模式提示 —— 让"分工"可见。
@@ -1219,7 +1242,7 @@ export async function renderDetail() {
   const id = S.current;
   const [ud, sd, cps] = await Promise.all([
     api(`/api/audit/${encodeURIComponent(id)}`).then(r => r.json()).catch(() => ({ audit: [] })),
-    api(`/api/sessions/${encodeURIComponent(id)}`).then(r => r.json()).catch(() => null),
+    api(`/api/sessions/${encodeURIComponent(id)}`).then(r => r.json()).then(dataOf).catch(() => null),
     api(`/api/checkpoints/${encodeURIComponent(id)}`).then(r => r.json()).catch(() => ({ checkpoints: [] })),
   ]);
   const audit = ud.audit || [];
@@ -4451,10 +4474,10 @@ function paintFsPreview() {
 export async function renderDashboard() {
   const [u, ss] = await Promise.all([
     api('/api/usage').then(r => r.json()),
-    api('/api/sessions?limit=12').then(r => r.json()).catch(() => ({ sessions: [] })),
+    api('/api/sessions?limit=12').then(r => r.json()).then(dataOf).catch(() => []),
   ]);
   const t = u.today || {}, w = u.total || {};
-  const sessions = ss.sessions || [];
+  const sessions = ss || [];
   // 窗口如实标注：后端 today 是**过去 24 小时**，total 是**过去 30 天**，
   // 都不是自然日/自然月。以前这里写「本月」，月初时数字会和账单对不上 ——
   // 数字对不上，用户就不信这个面板。

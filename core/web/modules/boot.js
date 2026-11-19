@@ -7,7 +7,7 @@ import { connect } from './agui.js';
 import { autoCollapse, fitTopbar } from './layout.js';
 import { loadSessions, loadTeams, loadWorkflowRuns, loadWorkflowTemplates, openSession, refreshState, setLocalOpen, setView, paintWelcome } from './models.js';
 import { applyBg, applyTheme } from './theme.js';
-import { $, api, applyClamp, bus, toast } from './core.js';
+import { $, api, applyClamp, bus, S, toast } from './core.js';
 import { loadUiExtensions } from './uiext.js';
 import './promptopt.js';
 import './search.js';
@@ -69,11 +69,21 @@ clampObserver.observe(document.body, { childList: true, subtree: true });
   fitTopbar();
   window.addEventListener('resize', fitTopbar);
   connect();
-  await refreshState(); await loadSessions(); await loadTeams();
+  await refreshState(); await loadSessions();
   // 首屏是空会话 —— 给欢迎页（问候 + 插画 + 功能入口），
   // 别让人对着一片空白不知道从哪开始。
   paintWelcome();
-  await loadWorkflowRuns(true); await loadWorkflowTemplates(true);
+  // **内核没就绪就别调那些走 RPC 的接口**（团队、工作流）。
+  //
+  // 它们在内核没起来时会返回 503。照常调的话，首屏控制台就是一排红字，
+  // 用户以为页面坏了 —— 实际只是内核还在启动。
+  //
+  // refreshState 每 6 秒跑一次，状态一翻转（kernel_ready 变 true）
+  // 会自动把这些数据补上，所以这里跳过不会丢东西。
+  if (S.kernelReady) {
+    await loadTeams();
+    await loadWorkflowRuns(true); await loadWorkflowTemplates(true);
+  }
   // 前端扩展：用户目录下的界面模块，不改核心文件就能加。
   // 放在最后 —— 核心先起来，扩展挂了也不影响主界面。
   try {
