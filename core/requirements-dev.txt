@@ -1,0 +1,13 @@
+# 开发/测试依赖（不装到生产环境）
+#
+#     pip install -r core/requirements-dev.txt
+
+-r requirements.txt
+
+# 单测
+pytest>=8.0
+pytest-asyncio>=0.24
+
+# 静态检查（本项目**没有**预装 linter，靠标准库 symtable 自查未定义名；
+# 装了 ruff 可以多一道保险）
+# ruff>=0.6

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from ..ipc import IpcError
@@ -96,8 +96,14 @@ async def index_library(agent, path: str, limit: int = 200) -> dict:
 
 # ── 磁盘 ──────────────────────────────────────────────────────────────
 
-def list_drives() -> JSONResponse:
-    """列出本机可用磁盘（Windows 用逻辑驱动器，类 Unix 用挂载点）。"""
+def list_drives() -> dict:
+    """列出本机可用磁盘（Windows 用逻辑驱动器，类 Unix 用挂载点）。
+
+    **返回 dict 而不是 JSONResponse** ——
+    调用方 `_drives` 会用 `json(...)` 包一层（那是全域统一的出口）。
+    这里自己返回一个 Response，会被套成 `JSONResponse(JSONResponse(...))`，
+    序列化直接炸 → 500。
+    """
     import shutil
     import string
 
@@ -145,7 +151,7 @@ def list_drives() -> JSONResponse:
                 )
             except OSError:
                 continue
-    return JSONResponse({"drives": items})
+    return {"drives": items}
 
 
 

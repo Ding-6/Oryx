@@ -83,6 +83,10 @@ def extract_js(html: str) -> str:
 
     优先用 web/_source/app.js（拆分基准快照，保证幂等）；
     没有快照时从 index.html 的内联脚本里取，并顺手存一份。
+
+    **这里不做「快照是否过期」的检查** —— 读取快照本身无害（`--analyze`
+    也要读它）。真正危险的是拿它去**覆盖** `web/modules/`，
+    那个检查放在 `assert_snapshot_current()`，只在写入前调。
     """
     if SOURCE.exists():
         return SOURCE.read_text("utf-8")
@@ -99,6 +103,72 @@ def extract_js(html: str) -> str:
     SOURCE.write_text(src, encoding="utf-8")
     print(f"已保存拆分基准快照 → {SOURCE}")
     return src
+
+
+def _mtime(path: Path) -> float:
+    """文件的修改时间（秒级时间戳）。
+
+    注意是 `os.path.getmtime`，不是 `time.mtime` —— 后者不存在。
+    """
+    import os
+
+    return os.path.getmtime(path)
+
+
+def _fmt_mtime(path: Path) -> str:
+    """把 mtime 格式化成「2026-11-05 14:32」。
+
+    注意 `time.strftime` 要的是 **time.struct_time**，不是浮点时间戳 ——
+    直接 `%Y` 格式化 float 会抛 ValueError。
+    """
+    import time
+
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(_mtime(path)))
+
+
+def _modules_newer_than_snapshot() -> list[str]:
+    """哪些 modules/ 文件比快照新（相对路径列表）。"""
+    if not SOURCE.exists() or not MODULES_DIR.is_dir():
+        return []
+    snap = _mtime(SOURCE)
+    out: list[str] = []
+    for f in MODULES_DIR.glob("*.js"):
+        try:
+            if _mtime(f) > snap:
+                out.append(f"modules/{f.name}")
+        except OSError:
+            continue
+    return sorted(out)
+
+
+def assert_snapshot_current(force: bool = False) -> None:
+    """**写入前**的闸：快照比 modules/ 旧就拒绝重新生成。
+
+    为什么必须有这道闸
+    ------------------
+    拆分是**一次性**操作：跑完之后 index.html 里已经没有内联脚本了，
+    之后所有前端改动都直接落在 `web/modules/*.js` 上。
+    于是快照会**越来越旧**，它跟 modules/ 的差距只会越来越大。
+
+    没有这道闸，某人跑一次这个脚本，就会把快照当现状，
+    把之后的前端改动**全部覆盖掉** —— 而且无声无息：
+    git diff 一看是「批量重写」，很容易误以为是自己的改动。
+    （实测：快照是 2026-11-05，modules/ 已到 2026-11-19。）
+    """
+    newer = _modules_newer_than_snapshot()
+    if not newer or force:
+        return
+    raise SystemExit(
+        "拒绝重新生成：web/modules/ 里有文件比拆分基准快照新。\n"
+        f"  快照：{SOURCE.relative_to(CORE_DIR)}（{_fmt_mtime(SOURCE)}）\n"
+        f"  新于快照的文件：{', '.join(newer[:5])}"
+        + (" …" if len(newer) > 5 else "")
+        + "\n\n"
+        "重新生成会用旧快照覆盖这些改动，且不留痕迹。\n"
+        "拆分是一次性操作 —— 现在 web/modules/ 才是前端的权威源。\n"
+        "确需重做：把 modules/ 合回 index.html 的内联脚本，删掉快照后再跑。\n"
+        "（实在要强推，加 --force。）"
+    )
 
 
 def split_zones(js: str) -> list[tuple[int, int, int]]:
@@ -372,6 +442,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--analyze", action="store_true")
     ap.add_argument("--verify", action="store_true")
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="即使 modules/ 比拆分基准快照新也强行重新生成（会覆盖后来的修改）",
+    )
     args = ap.parse_args()
 
     info = analyze()
@@ -387,6 +462,10 @@ def main() -> int:
         return 0
 
     # ── 生成 ────────────────────────────────────────────────────────
+    # 闸在这里，不在 extract_js —— 因为 extract_js 是只读路径（--analyze 也要用），
+    # 真正危险的是下面那句 shutil.rmtree(MODULES_DIR)。
+    assert_snapshot_current(force=args.force)
+
     # 合并后的分区 → 模块
     module_zones: dict[str, list[int]] = {}
     for z, mod in p["final_zone_module"].items():
