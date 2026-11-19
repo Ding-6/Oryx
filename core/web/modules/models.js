@@ -5500,8 +5500,14 @@ export async function renderSettings() {
       extTog.disabled = true;
       extTog.textContent = '处理中…';
       try {
-        const path = next ? 'enable' : 'disable';
-        const r = await api(`/api/extensions/${encodeURIComponent(extId)}/${path}`, { method: 'POST' });
+        // 两条路径写全，不把 'enable'/'disable' 拼进模板 ——
+        // 拼出来的 URL 静态分析认不出（`scripts/check_api_coverage.py` 靠它对齐前后端）
+        const r = await api(
+          next
+            ? `/api/extensions/${encodeURIComponent(extId)}/enable`
+            : `/api/extensions/${encodeURIComponent(extId)}/disable`,
+          { method: 'POST' },
+        );
         const d = await r.json();
         if (!r.ok) {
           const x = await r.json().catch(() => ({}));
@@ -5526,8 +5532,13 @@ export async function renderSettings() {
       uiTog.disabled = true;
       uiTog.textContent = '处理中…';
       try {
-        const path = next ? 'enable' : 'disable';
-        const r = await api(`/api/extensions/${encodeURIComponent(extId)}/${path}`, { method: 'POST' });
+        // 同样写全两条路径（理由见上面那处）
+        const r = await api(
+          next
+            ? `/api/extensions/${encodeURIComponent(extId)}/enable`
+            : `/api/extensions/${encodeURIComponent(extId)}/disable`,
+          { method: 'POST' },
+        );
         if (!r.ok) toast('切换失败');
         else toast(next ? '已启用' : '已停用');
         await reloadExtensionsSection(main);
