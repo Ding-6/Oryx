@@ -117,9 +117,60 @@ pip install fastapi uvicorn httpx pyyaml pillow cryptography python-docx openpyx
 
 - 如果 **8765 端口已有内核在跑**，直接复用，不会重复启动。
 - 内核启动超过 25 秒仍未就绪，窗口跳到提示页，给出手动启动命令。
+- **失败会显示真实原因**，不是一句「超时」：
+  - 内核进程起来就退出 → 显示退出码（依赖缺失、解释器不对都能看出来）
+  - 解释器找不到 / spawn 失败 → 显示具体原因
+  - 真的只是慢 → 显示端口没监听
 - 关闭窗口时终止它拉起的 Python 进程（复用已有内核时不会误杀）。
 - **强杀也不留孤儿**：内核启动时接收 `--parent-pid`，每秒检查父进程是否还在，父进程消失就自行退出。
 - 内核目录查找顺序：`ORYX_CORE_DIR` 环境变量 → **安装包资源目录** → 从可执行文件往上找 `core/oryx/__main__.py`。
+
+### ⚠ spawn Python 必须带 `CREATE_NO_WINDOW`
+
+桌面壳是 **GUI 子系统**程序（`windows_subsystem = "windows"`），
+内核是 **控制台子系统**程序（`python.exe`）。
+
+GUI 父进程 spawn 控制台子进程时如果**不带** `CREATE_NO_WINDOW`，
+子进程得自己新分配一个控制台（父进程没有控制台可继承）——
+这一步要加载 conhost.dll，**慢 3 倍**，而且**会偶发失败**：
+
+- 退出码 `0xC0000142`（STATUS_DLL_INIT_FAILED）
+- Windows 弹「python.exe - Application Error：应用程序无法正常启动(0xc0000142)」的框
+- 内核**一个字节都没跑起来**
+
+实测对照（同一台机器，spawn python.exe 的平均耗时）：
+
+| 父进程 | 不带标志 | 带标志 |
+|---|---|---|
+| 控制台子系统 | 223ms | 244ms（**没差别**） |
+| **GUI 子系统**（≡ Tauri 壳） | **796ms** | **253ms** |
+
+**只有 GUI 父进程才有差别** —— 控制台父进程有控制台可继承，不走那条路。
+在 pytest 里直接 spawn 是测不出来的（pytest 是控制台进程），
+所以行为验证要用 `pythonw.exe` 起一个 GUI 子进程当父进程。
+
+所以桌面壳里**所有** spawn Python 的地方都要走 `paths::hide_console()`——
+包括探测依赖的那次（`has_backend_deps`）。
+探测那次不带标志会**假失败**（进程没起来，退出码非 0），
+于是 `find_python` 误判「这个解释器不行」，白白跳到下一个候选 ——
+用户看到的就是「明明装了 Python，桌面端却说找不到」。
+
+> Python 侧（`prewarm.py` / `agentlink.py`）本来就有 `CREATE_NO_WINDOW`，
+> 只有 Rust 这条主链路漏了 —— 现在补齐了。
+
+**防回归**（两层，缺一不可）：
+
+| 层 | 位置 | 作用 |
+|---|---|---|
+| 确定性 | `paths.rs` 的 `every_spawn_site_applies_hide_console` | 查源码里每个 spawn 点有没有走 `hide_console` —— **永远不漏** |
+| 行为验证 | `core/tests/test_desktop_spawn_flags.py` | 用 GUI 父进程真 spawn，验证耗时差与稳定性 |
+
+> 只靠行为验证守不住：那个失败是**偶发**的（60 次命中 1 次），
+> 跑几百次太慢、跑少了会漏。必须配一个确定性检查。
+> 我第一版用 `cmd.exe` 当行为验证的代理 —— 摘掉标志照样全绿，
+> 说明 cmd.exe 不走那条会炸的初始化路径，**完全守不住**。
+
+顺带好处：不会闪一个黑色控制台窗口出来。
 
 ## 实测结果
 

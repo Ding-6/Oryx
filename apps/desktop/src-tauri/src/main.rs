@@ -108,8 +108,19 @@ fn core_dir_early() -> Option<std::path::PathBuf> {
 /// 解释器路径由 paths::find_python 找 —— 不能只靠 PATH：
 /// 这台机器上 python 不在系统 PATH 里，只 spawn "python" 会失败，
 /// 桌面端起来了但内核没起，界面一片空白。
-fn spawn_python(core: &std::path::Path, port: u16) -> Option<Child> {
-    let python = paths::find_python()?;
+///
+/// **必须带 `CREATE_NO_WINDOW`** —— 见 `paths::hide_console` 的注释。
+/// 不带的话，GUI 壳 spawn 控制台 python.exe 会偶发 `0xC0000142`：
+/// 内核一个字节都没跑起来，Windows 还弹一个「应用程序无法正常启动」的框，
+/// 而这里 `.ok()` 会把失败吞成 `None` —— 用户只看到「内核启动超时」，
+/// 完全不知道真实原因。
+///
+/// 所以这里**不吞错误**：spawn 失败要把原因记下来，
+/// 让启动页能显示「为什么没起来」而不是干等 25 秒。
+fn spawn_python(core: &std::path::Path, port: u16) -> Result<Child, String> {
+    let python = paths::find_python().ok_or_else(|| {
+        "找不到可用的 Python 解释器（PATH 里没有，且常见安装位置也没找到能 import fastapi/uvicorn 的）".to_string()
+    })?;
     let mut cmd = Command::new(&python);
     cmd.arg("-m")
         .arg("oryx")
@@ -121,27 +132,67 @@ fn spawn_python(core: &std::path::Path, port: u16) -> Option<Child> {
         .current_dir(core)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    cmd.spawn().ok()
+    paths::hide_console(&mut cmd);
+    cmd.spawn()
+        .map_err(|e| format!("拉起 {} 失败：{e}", python.display()))
 }
 
-fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Option<Child> {
+/// 拉起内核（复用已有 / 新拉起 / 失败）。
+///
+/// 返回 `Ok(None)` = 复用已在跑的实例；`Ok(Some(child))` = 新拉起；
+/// `Err(reason)` = 拉不起来，`reason` 是给用户看的原因。
+fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Option<Child>, String> {
     if port_ready(port) {
         // 已经有一个内核在跑（比如用户先启动了命令行版本），直接复用
-        return None;
+        return Ok(None);
     }
     let core = core_dir(app);
-    spawn_python(&core, port)
+    spawn_python(&core, port).map(Some)
 }
 
-fn wait_ready(port: u16, timeout: Duration) -> bool {
+/// 等内核就绪，同时盯着子进程的死活。
+///
+/// 返回 `Ok(true)` = 端口通了；`Err(reason)` = 没起来，`reason` 是原因。
+///
+/// 为什么不能只等端口：内核要是起来就立刻退出（依赖缺失、解释器不对），
+/// 端口永远不通 —— 光等端口的话用户要干等 25 秒才知道失败，
+/// 而且不知道失败在哪。盯住子进程的退出码能马上给出真实原因。
+fn wait_ready_or_report(
+    handle: &tauri::AppHandle,
+    port: u16,
+    timeout: Duration,
+) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
+    loop {
         if port_ready(port) {
-            return true;
+            return Ok(());
+        }
+        // 内核自己退了？把退出码带出去 —— 这比「超时」有用得多。
+        if let Some(state) = handle.try_state::<Backend>() {
+            if let Ok(mut guard) = state.0.lock() {
+                if let Some(child) = guard.as_mut() {
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            return Err(format!(
+                                "内核进程启动后立刻退出（退出码 {}）",
+                                status.code().map(|c| c.to_string()).unwrap_or_else(|| "被系统终止".into())
+                            ));
+                        }
+                        Ok(None) => {}
+                        Err(e) => return Err(format!("内核进程状态查询失败：{e}")),
+                    }
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "内核在 {} 秒内没监听 {} 端口",
+                timeout.as_secs(),
+                port
+            ));
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    false
 }
 
 fn main() {
@@ -161,7 +212,7 @@ fn main() {
     let early: Mutex<Option<Child>> = Mutex::new(if port_ready(port) {
         None
     } else {
-        core_dir_early().and_then(|core| spawn_python(&core, port))
+        core_dir_early().and_then(|core| spawn_python(&core, port).ok())
     });
 
     let mut builder = tauri::Builder::default();
@@ -179,25 +230,60 @@ fn main() {
 
     builder
         .setup(move |app| {
-            let child = early
-                .lock()
-                .ok()
-                .and_then(|mut guard| guard.take())
-                .or_else(|| spawn_backend(&app.handle().clone(), port));
+            // 内核的拉起结果：拉不起来就把原因记下来，给启动页显示。
+            // 以前这里是 `.ok()` —— 失败被吞成 None，用户只能看到
+            // 「内核启动超时」，完全不知道真实原因（0xc0000142？找不到解释器？）。
+            let mut spawn_error: Option<String> = None;
+            let child: Option<Child> = match early.lock().ok().and_then(|mut guard| guard.take()) {
+                Some(c) => Some(c),
+                None => match spawn_backend(&app.handle().clone(), port) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        spawn_error = Some(e);
+                        None
+                    }
+                },
+            };
             app.manage(Backend(Mutex::new(child)));
 
             // 等内核起来后再导航，避免用户看到一片白
             if let Some(_window) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
+                let spawn_error = spawn_error.clone();
                 std::thread::spawn(move || {
-                    if wait_ready(port, BACKEND_START_TIMEOUT) {
-                        let url = format!("http://127.0.0.1:{port}");
-                        let inner = handle.clone();
-                        let _ = handle.run_on_main_thread(move || {
-                            if let Some(w) = inner.get_webview_window("main") {
-                                let _ = w.eval(&format!("window.location.replace('{url}')"));
-                            }
-                        });
+                    let reason = match wait_ready_or_report(&handle, port, BACKEND_START_TIMEOUT) {
+                        Ok(()) => None,
+                        Err(e) => Some(match spawn_error {
+                            Some(se) => format!("{se}（{e}）"),
+                            None => e,
+                        }),
+                    };
+                    match reason {
+                        None => {
+                            let url = format!("http://127.0.0.1:{port}");
+                            let inner = handle.clone();
+                            let _ = handle.run_on_main_thread(move || {
+                                if let Some(w) = inner.get_webview_window("main") {
+                                    let _ = w.eval(&format!("window.location.replace('{url}')"));
+                                }
+                            });
+                        }
+                        Some(msg) => {
+                            // 把真实原因送到启动页 —— 启动页据此显示失败，
+                            // 而不是让用户对着一个「超时」猜。
+                            eprintln!("[oryx] 内核启动失败：{msg}");
+                            let inner = handle.clone();
+                            let _ = handle.run_on_main_thread(move || {
+                                if let Some(w) = inner.get_webview_window("main") {
+                                    let js = format!(
+                                        "window.__ORYX_START_ERROR__ = {}; window.__oryxReportStartError && window.__oryxReportStartError({});",
+                                        serde_json::to_string(&msg).unwrap_or_else(|_| "\"未知错误\"".into()),
+                                        serde_json::to_string(&msg).unwrap_or_else(|_| "\"未知错误\"".into())
+                                    );
+                                    let _ = w.eval(&js);
+                                }
+                            });
+                        }
                     }
                 });
             }

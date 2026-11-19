@@ -84,6 +84,35 @@
   const BASE = `http://127.0.0.1:${PORT}`;
   const started = Date.now();
 
+  // 桌面壳（Rust 侧）把内核启动失败的**真实原因**送进来。
+  // 以前这里只能显示「内核启动超时」—— 用户看到的是一句废话，
+  // 不知道是找不到解释器、是内核起来就退了、还是端口没起来。
+  window.__ORYX_START_ERROR__ = null;
+  window.__oryxReportStartError = (msg) => {
+    window.__ORYX_START_ERROR__ = msg;
+    showFailure(msg);
+  };
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  function showFailure(reason) {
+    document.querySelector('.bar').style.display = 'none';
+    document.getElementById('status').textContent = '内核启动失败';
+    const err = document.getElementById('error');
+    err.style.display = 'block';
+    const why = reason
+      ? `<div style="margin-bottom:10px">${escapeHtml(reason)}</div>`
+      : '';
+    err.innerHTML =
+      why +
+      '请手动在项目目录执行：<br><code>cd core &amp;&amp; python -m oryx</code><br>' +
+      '确认命令行没有报错，然后重新打开本窗口。';
+  }
+
   async function poll() {
     try {
       // 用公开无副作用的探活接口；带令牌的业务接口由内核自己下发页面
@@ -95,15 +124,15 @@
       }
     } catch (_) { /* 内核还没起来 */ }
 
+    // 桌面壳报了失败原因 —— 直接显示，别再干等到超时
+    if (window.__ORYX_START_ERROR__) {
+      showFailure(window.__ORYX_START_ERROR__);
+      return;
+    }
+
     const elapsed = (Date.now() - started) / 1000;
     if (elapsed > 30) {
-      document.querySelector('.bar').style.display = 'none';
-      document.getElementById('status').textContent = '内核启动超时';
-      const err = document.getElementById('error');
-      err.style.display = 'block';
-      err.innerHTML =
-        '请手动在项目目录执行：<br><code>cd core &amp;&amp; python -m oryx</code><br>' +
-        '确认命令行没有报错，然后重新打开本窗口。';
+      showFailure(null);
       return;
     }
     document.getElementById('status').textContent =

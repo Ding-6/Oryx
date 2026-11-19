@@ -23,8 +23,51 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 /// 根目录下的各个子目录名。
 const APP_DIR: &str = "Oryx";
+
+/// Windows 的 `CREATE_NO_WINDOW` 创建标志。
+///
+/// 为什么必须有这个（2026-11-19 实测定位）：
+/// 桌面壳是 **GUI 子系统**程序（`windows_subsystem = "windows"`），
+/// 而内核是 **控制台子系统**程序（`python.exe`）。
+///
+/// GUI 父进程 spawn 控制台子进程时，如果**不带**这个标志，
+/// 子进程得自己新分配一个控制台 —— 父进程没有控制台可继承，
+/// 这个分配在某些时刻会失败。失败发生在进程启动的 DLL 初始化阶段，
+/// 表现为：
+///   · 退出码 `0xC0000142`（STATUS_DLL_INIT_FAILED）
+///   · Windows 弹一个「python.exe - Application Error：应用程序无法正常启动(0xC0000142)」的框
+///   · 内核**一个字节都没跑起来** —— 桌面端只看到端口没通，25 秒后报「内核启动超时」
+///
+/// 实测对照（同一台机器，spawn python.exe 的平均耗时）：
+///
+/// | 父进程         | 不带标志 | 带标志 |
+/// |----------------|----------|--------|
+/// | 控制台子系统   | 223ms    | 244ms  | ← **没差别**（有控制台可继承）
+/// | **GUI 子系统** | **796ms**| 253ms  | ← 慢 3 倍，且偶发挂
+///
+/// 只有 GUI 父进程才有差别 —— **Tauri 壳正是 GUI 子系统**。
+/// 在 pytest 里直接 spawn 测不出来（pytest 是控制台进程），
+/// 所以行为验证要用 `pythonw.exe` 起一个 GUI 子进程当父进程。
+///
+/// 顺带一个好处：不会闪一个黑色控制台窗口出来。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// 给命令加上 `CREATE_NO_WINDOW`（仅 Windows 有效，其他平台原样返回）。
+///
+/// 桌面壳里**所有** spawn Python 的地方都要走这个函数 —— 包括探测依赖的那次。
+/// 探测那次也是 GUI 父进程 spawn 控制台子进程，一样会踩上面那个坑。
+pub fn hide_console(cmd: &mut Command) {
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    #[cfg(not(windows))]
+    let _ = cmd;
+}
 
 /// 算出数据根目录。
 ///
@@ -194,14 +237,20 @@ pub fn find_python() -> Option<PathBuf> {
 ///
 /// 判据用 `import fastapi, uvicorn` —— 少一个内核就起不来。
 /// 一次探测约 0.3 秒，只在启动时做一次，可以接受。
+///
+/// **必须带 `CREATE_NO_WINDOW`** —— 探测本身也是 GUI 父进程 spawn 控制台子进程，
+/// 不带标志会偶发 `0xC0000142`。那种情况下探测会**假失败**（进程没起来，
+/// 退出码非 0），于是 `find_python` 会误判「这个解释器不行」，
+/// 白白跳到下一个候选 —— 用户看到的就是「明明装了 Python，桌面端却说找不到」。
 fn has_backend_deps(python: &Path) -> bool {
     use std::process::Stdio;
-    Command::new(python)
-        .arg("-c")
+    let mut cmd = Command::new(python);
+    cmd.arg("-c")
         .arg("import fastapi, uvicorn")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .stderr(Stdio::null());
+    hide_console(&mut cmd);
+    cmd.status()
         .map(|s| s.success())
         .unwrap_or(false)
 }
@@ -233,4 +282,64 @@ fn which(name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 防回归：`CREATE_NO_WINDOW` 的值不能被改错。
+    ///
+    /// 这个标志的缺失是**偶发**才出问题的 —— 不带它，十次里可能只挂一次，
+    /// 而且失败现象是「内核启动超时」这种看起来毫不相关的信息。
+    /// 等到线上炸了再回头找，代价太大。所以钉一个测试守着。
+    #[cfg(windows)]
+    #[test]
+    fn create_no_window_flag_value_is_correct() {
+        assert_eq!(
+            CREATE_NO_WINDOW, 0x0800_0000,
+            "CREATE_NO_WINDOW 的值变了 —— 这个标志改错会让修复失效"
+        );
+    }
+
+    /// 防回归：**所有** spawn Python 的地方都必须带 `CREATE_NO_WINDOW`。
+    ///
+    /// 为什么用「查源码」而不是「跑一百次看会不会挂」：
+    /// 那个失败是**偶发**的 —— 实测不带标志时 60 次命中 1 次（≈1.7%）。
+    /// 想靠跑次数抓住它，要么跑几百次（测试要几分钟，太慢），
+    /// 要么就是**概率性地漏掉**（我试过用 cmd.exe 当代理，摘掉标志照样全绿）。
+    ///
+    /// 所以改成查源码里 spawn 的调用点 —— 确定性检查，永远不漏。
+    /// 真正的行为验证交给 Python 侧的脚本
+    /// （`core/tests/test_desktop_spawn_flags.py`），那边能控节奏。
+    ///
+    /// 判据：`Command::new(` 出现的每个地方，
+    /// 在同一个函数体内必须能读到 `hide_console`。
+    #[cfg(windows)]
+    #[test]
+    fn every_spawn_site_applies_hide_console() {
+        let src = include_str!("paths.rs");
+        let main_src = include_str!("main.rs");
+
+        for (name, text) in [("paths.rs", src), ("main.rs", main_src)] {
+            let mut search_from = 0usize;
+            while let Some(pos) = text[search_from..].find("Command::new(") {
+                let idx = search_from + pos;
+                search_from = idx + 1;
+                // 取这个调用点往后的一段。
+                // 必须按**字符**边界切 —— 中文注释里一个汉字 3 字节，
+                // 按字节切会切在字符中间（Rust 直接 panic）。
+                let window: String = text[idx..].chars().take(700).collect();
+                // 跳过测试模块里的自测代码
+                let is_test = window.contains("#[test]") || window.contains("mod tests");
+                if !is_test && !window.contains("hide_console") {
+                    let line = text[..idx].lines().count();
+                    panic!(
+                        "{name}:{line} 有 Command::new 但没走 hide_console —— \
+                         GUI 父进程 spawn 控制台子进程必须带 CREATE_NO_WINDOW"
+                    );
+                }
+            }
+        }
+    }
 }

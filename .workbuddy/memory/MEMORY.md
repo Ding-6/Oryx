@@ -77,6 +77,30 @@
 5. **Edge 会在系统 temp 里造 `HeadlessEdge*` / `msedge_url_fetcher_*`
    （每个 140MB）** —— 项目本来有 `paths.redirect_env()`，但**测试脚本起
    Chrome 时没走它** → 攒了 14.5GB 到 C 盘。跑测试前先 `setup_browser_temp()`。
+6. **GUI 父进程 spawn 控制台子进程，必须带 `CREATE_NO_WINDOW`** ——
+   不带会**偶发** `0xC0000142`（子进程在 DLL 初始化阶段就死，一个字节没跑）。
+   Rust 侧走 `paths::hide_console()`，Python 侧走
+   `creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)`。
+   **探测依赖的那次 spawn 也要带** —— 不带会**假失败**，让
+   `find_python` 误判「这个解释器不行」，白白跳到下一个候选。
+   （2026-11-19 桌面端「内核启动超时」的真正根因。）
+
+   **机制要点（实测对照，容易搞错）**：只有 **GUI 父进程**才有差别 ——
+   控制台父进程有控制台可继承，子进程直接用。
+   实测 spawn python.exe 的平均耗时：
+   控制台父进程 223ms vs 244ms（**没差别**）；
+   GUI 父进程 **796ms vs 253ms**（慢 3 倍）——
+   多出来的就是「新建控制台」（加载 conhost.dll），
+   而 `0xC0000142` 正是在这一步失败。
+
+   **所以在 pytest 里直接 spawn 是测不出差别的**（pytest 是控制台进程）。
+   我第一版就这么写，测出 1ms vs 1ms，差点误判成「结论不成立」。
+   行为验证必须用 `pythonw.exe` 起一个 GUI 子进程当父进程。
+
+   **别用 cmd.exe 当代理** —— 它不走那条会炸的初始化路径，
+   摘掉标志照样全绿，**完全守不住回归**。
+   防回归要**两层**：确定性查源码（每个 spawn 点有没有走 `hide_console`）
+   + 行为验证。**偶发**的失败靠跑次数堆不出来 —— 60 次才命中 1 次。
 
 ## 五、架构决策（为什么这样，不那样）
 
