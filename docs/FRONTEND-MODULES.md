@@ -63,6 +63,30 @@ background:
 > `--on-brand` 配品牌紫渐变（两套都是够深配白字）。
 > 共用一个变量的话，两边必有一边不达标。
 
+### 设计语言（所有页面通用）
+
+改 UI 时**先认这几条**，不然某个页面会跟整套不搭：
+
+| 元素 | 类 | 规格 |
+|---|---|---|
+| 卡片 | `.uc` `.tile` `.team` `.card` `.btask` | 16px 圆角 + `0 10px 30px -12px rgba(60,50,140,.26)` |
+| 页签选中 | `.subtabs.on` `.seg.on` `.cap.on` `.bgmode.on` | `--accent-soft` 底 + `--accent` 字 |
+| 主按钮 | `.btn.primary` | `--brand-1→2` 渐变 + `--on-brand` 字 |
+| 次要按钮 | `.btn` | `--card` 底 + 10px 圆角 |
+| 输入框 | `.inp` | `--card` 底 + 10px 圆角 |
+| 空态 | `.empty` | `--accent-soft` 底 + 14px 圆角，**max-width 440px 居中** |
+| 左栏空态 | `.railgroup .empty` | 透明底 —— 窄栏里不要用通用空态 |
+
+**暗色主题单独处理**：空态用 `--panel-2` 而不是 `--accent-soft`
+（淡紫在深色里比周围卡片还亮）。
+
+### 卡片等高
+
+`.tile` 做成 flex 列 + 按钮 `margin-top:auto` ——
+同一行一样高，描述短的把空白留在中间，按钮仍然贴底。
+
+用 `scripts/check_grid.py` 验（**按行分组**报，肉眼看截图容易判错）。
+
 ### 几个入口都是「真动作」
 
 界面上的卡片/按钮都接到实际功能，不是摆设：

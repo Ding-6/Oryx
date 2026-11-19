@@ -70,6 +70,8 @@
        品牌紫两套都是「够深配白字」，
        共用一个变量的话，两边必有一边不达标。 */
     --on-brand:  #FFFFFF;
+    /* logo 里的星星 —— 两套主题下都是纯白 */
+    --mark-fg:   #FFFFFF;
     --brand-3:   #7C7BF7;   /* logo 图标渐变 */
     --brand-4:   #8B5CF6;
     --grad-1:    #FBFAFF;   /* 页面渐变 */

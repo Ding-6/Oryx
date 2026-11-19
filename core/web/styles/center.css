@@ -102,16 +102,22 @@
     transition:background .15s, color .15s;
   }
   .seg button:hover { color:var(--ink); }
-  .seg button.on { background:var(--bg-2); color:var(--ink); font-weight:600; box-shadow:var(--shadow); }
+  /* 选中态：**淡紫底 + 紫字**。
+     以前是白底 + 阴影，在淡紫背景上看着像「浮起来的一块」，
+     跟整套紫色调不搭。 */
+  .seg button.on { background:var(--accent-soft); color:var(--accent); font-weight:600; }
   .btn {
-    border:1px solid var(--line-strong); background:var(--bg-2);
-    border-radius:var(--r);
-    padding:5px 9px; cursor:pointer;
+    border:1px solid var(--line); background:var(--card);
+    border-radius:10px;
+    padding:6px 12px; cursor:pointer;
     font-size:12px; font-weight:500; color:var(--ink-2);
     white-space:nowrap;
-    transition:border-color .15s, color .15s, background .15s;
+    transition:border-color .15s, color .15s, background .15s, box-shadow .15s;
   }
-  .btn:hover { border-color:var(--muted); color:var(--ink); }
+  .btn:hover {
+    border-color:var(--accent-line); color:var(--accent);
+    background:var(--accent-soft);
+  }
   /* 顶栏里的下拉收紧 —— 原生 select 的箭头占位很宽，
      「无专家」一个小下拉要 100px，把模型名的位置挤没了。
      限宽 + 少留右边距，省下的宽度给模型 chip。 */
@@ -119,13 +125,19 @@
     max-width:72px; padding:5px 4px 5px 7px;
     text-overflow:ellipsis;
   }
+  /* 主按钮：品牌紫渐变 + 柔和紫影 —— 与「新建对话」胶囊同一套色。
+     以前是纯 --accent 实心，在淡紫底上显得平。 */
   .btn.primary {
-    background:var(--accent);
-    border-color:var(--accent);
-    color:var(--on-accent);
+    background:linear-gradient(135deg, var(--brand-1) 0%, var(--brand-2) 100%);
+    border-color:transparent;
+    color:var(--on-brand);
     font-weight:600;
+    box-shadow:0 4px 14px -5px color-mix(in srgb, var(--accent) 70%, transparent);
   }
-  .btn.primary:hover { color:var(--on-accent); filter:brightness(1.08); }
+  .btn.primary:hover {
+    color:var(--on-brand); filter:brightness(1.06);
+    box-shadow:0 6px 18px -6px color-mix(in srgb, var(--accent) 80%, transparent);
+  }
   .btn.ghost { border-color:transparent; background:transparent; }
   .btn:disabled { opacity:.4; cursor:not-allowed; }
   .spacer { flex:1; }

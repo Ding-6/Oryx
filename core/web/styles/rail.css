@@ -54,7 +54,7 @@
     background:linear-gradient(140deg, var(--brand-3) 0%, var(--accent) 55%, var(--brand-4) 100%);
     box-shadow:0 4px 12px -3px color-mix(in srgb, var(--accent) 55%, transparent);
   }
-  .logo .lmark svg { width:17px; height:17px; fill:#FFFFFF; stroke:none; }
+  .logo .lmark svg { width:17px; height:17px; fill:var(--mark-fg); stroke:none; }
   .logo .ltxt { display:flex; flex-direction:column; min-width:0; line-height:1.25; }
   .logo .ltxt b {
     font-size:18px; font-weight:700; letter-spacing:-.3px;
@@ -300,3 +300,14 @@
   }
   .seeall:hover { color:var(--accent); }
   .seeall span { font-size:14px; line-height:1; }
+
+  /* 左栏的会话列表空态 —— **不要**用通用 `.empty`。
+     通用空态是「淡紫底 + 大圆角」，那是给内容区的大块留白用的；
+     塞进 188px 的窄栏里，一大块紫比导航项还抢眼。 */
+  .railgroup .empty {
+    background:transparent;
+    padding:10px 8px;
+    text-align:left;
+    font-size:var(--fs-xs);
+    color:var(--muted);
+  }

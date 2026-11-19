@@ -139,14 +139,23 @@
     color:var(--muted);
     font-size:12.5px;
     text-align:center;
-    padding:20px 12px;
-    /* 浅灰底、无边框。
+    padding:22px 14px;
+    /* 浅紫底、无边框、大圆角。
        以前是「1px 虚线框」—— 空状态本该是最轻的一层，
-       虚线框把它画成了一个「待填的表单」，显得刺眼又占地方。 */
-    background:var(--panel);
+       虚线框把它画成了一个「待填的表单」，显得刺眼又占地方。
+       现在跟整套紫色调一致，像一块安静的占位。 */
+    background:var(--accent-soft);
     border:0;
-    border-radius:var(--r);
+    border-radius:14px;
+    /* 空态块**不要满宽** —— 页面区一空就是一大条淡紫横条，
+       比内容还抢眼。收窄居中，看起来像「这里还没有东西」，
+       而不是「这里有一大块什么」。 */
+    max-width:440px; margin-left:auto; margin-right:auto;
   }
+  /* 暗色下空态块要用**中性**的面板底，不是淡紫 ——
+     `--accent-soft` 在深色里比周围的卡片还亮一块，
+     「这里还没有东西」变成了「这里有个发光的提示」。 */
+  [data-theme="dark"] .empty { background:var(--panel-2); }
 
   /* Step 卡 */
   .step {

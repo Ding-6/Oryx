@@ -5,7 +5,8 @@
   .team {
     border:1px solid var(--line);
     background:var(--card);
-    border-radius:var(--r-lg);
+    border-radius:16px;
+    box-shadow:0 10px 30px -12px rgba(60,50,140,.26);
     padding:14px 16px;
     margin-bottom:10px;
     box-shadow:var(--shadow);
@@ -206,11 +207,20 @@
   .tile {
     background:var(--card);
     border:1px solid var(--line);
-    border-radius:var(--r-lg);
+    /* 与 `.uc` 同一套卡片语言：大圆角 + 柔和紫影。 */
+    border-radius:16px;
+    box-shadow:0 10px 30px -12px rgba(60,50,140,.26);
     padding:var(--sp-4) var(--sp-4);
     transition:border-color var(--dur-fast) ease, transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
     position:relative;
+    /* **卡片等高** —— 同一行的卡片要一样高，描述短的也要撑到一样。
+       以前是纯 block，高度由内容决定：一行里有的 173px、有的 131px，
+       底边参差不齐，看着像没对齐。
+       现在做成 flex 列 + 按钮 `margin-top:auto`，
+       描述短的那张把空白留在中间，按钮仍然贴底。 */
+    display:flex; flex-direction:column;
   }
+  .tile > .btn, .tile > button, .tile .tilefoot { margin-top:auto; }
   .tile:hover { border-color:var(--accent-line); transform:translateY(-1px); box-shadow:var(--shadow-md); }
   .tile h3 {
     margin:0 0 var(--sp-1);
@@ -235,9 +245,9 @@
   .card {
     background:var(--card);
     border:1px solid var(--line);
-    border-radius:var(--r-lg);
+    border-radius:16px;
     padding:20px 22px;
-    box-shadow:var(--shadow);
+    box-shadow:0 10px 30px -12px rgba(60,50,140,.26);
     position:relative;
   }
 
@@ -254,7 +264,10 @@
   .uc {
     background:var(--card);
     border:1px solid var(--line);
-    border-radius:var(--r-lg);
+    /* **大圆角 + 柔和紫影** —— 设计稿的卡片是浮在淡紫底上的独立白块，
+       不是「描了个边的方块」。 */
+    border-radius:16px;
+    box-shadow:0 10px 30px -12px rgba(60,50,140,.26);
     padding:14px 16px;
     display:flex;
     flex-direction:column;
@@ -354,10 +367,10 @@
   .confirm .ctxt b { color:var(--ink); }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   .inp {
-    background:var(--bg-2);
+    background:var(--card);
     border:1px solid var(--line);
-    border-radius:var(--r);
-    padding:7px 12px;
+    border-radius:10px;
+    padding:8px 12px;
     outline:none;
     font-size:13.5px;
     color:var(--ink);
@@ -475,14 +488,14 @@
     transition:border-color .15s, color .15s, background .15s;
   }
   .cap:hover { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
-  .cap.on { border-color:var(--accent); background:var(--accent); color:var(--on-accent); font-weight:600; }
+  .cap.on { border-color:var(--accent-line); background:var(--accent-soft); color:var(--accent); font-weight:600; }
   .cap svg { width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:1.7; }
 
   /* 已选能力回显框 */
   .pickedbox {
     display:inline-flex; flex-direction:column; align-items:center; gap:2px;
     max-width:100%; padding:13px 20px;
-    background:var(--bg-2); border:1px solid var(--line); border-radius:var(--r-lg);
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
   }
   .pickedbox .pk { font-size:11px; font-weight:600; color:var(--muted); letter-spacing:.3px; }
   .pickedbox .pl {

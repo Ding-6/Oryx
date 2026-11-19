@@ -103,7 +103,13 @@
     transition:color .15s, border-color .15s, background .15s;
   }
   .subtabs button:hover { color:var(--accent); border-color:var(--accent-line); }
-  .subtabs button.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:600; }
+  /* 页签选中态：**淡紫底 + 紫字**，不是深紫实心。
+     深紫实心块在一排页签里太抢眼 —— 选中一个而已，
+     不该比页面标题还重。 */
+  .subtabs button.on {
+    background:var(--accent-soft); border-color:var(--accent-line);
+    color:var(--accent); font-weight:600;
+  }
 
   /* 开关行 */
   .switchrow {
@@ -157,7 +163,7 @@
     transition:border-color .15s, background .15s, color .15s;
   }
   .bgmode:hover { border-color:var(--accent-line); }
-  .bgmode.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:600; }
+  .bgmode.on { background:var(--accent-soft); border-color:var(--accent-line); color:var(--accent); font-weight:600; }
   .bgmode small { display:block; font-size:10px; opacity:.75; margin-top:1px; font-weight:400; }
 
   /* 窄屏让位给主区 —— 具体宽度写在上面 #rail / #side 的 clamp 里 */
