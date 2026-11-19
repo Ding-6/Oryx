@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from ..agentlink import AgentLink
 from ..ipc import IpcError
+from ._common import is_kernel_unready
 
 router = APIRouter(prefix="/api/workflows", tags=["工作流"])
 
@@ -157,6 +158,10 @@ def _call(agent: AgentLink, method: str, **params):
 
 def _map(exc: IpcError) -> HTTPException:
     text = _clean(str(exc))
+    # 「内核未就绪」是 503 —— 服务端依赖没就绪，不是请求写错了。
+    # 规则与 _common.rpc_failure 一致，判据也共用同一个函数。
+    if is_kernel_unready(text):
+        return HTTPException(503, text)
     if "没有这次运行" in text or "没有正在跑" in text or "没有这个模板" in text:
         return HTTPException(404, text)
     return HTTPException(400, text)

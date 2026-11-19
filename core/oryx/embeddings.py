@@ -44,7 +44,47 @@ _load_error: str | None = None
 _loaded_dir: Path | None = None
 
 
+def runtime_available(model_dir: Path | None = None) -> bool:
+    """推理**依赖**装没装。
+
+    模型文件在，但 `transformers` / `onnxruntime` 没装 —— 一调用就炸。
+    `available()` 只看模型文件，会误报「可用」，
+    于是本该跳过的测试变成**失败**（本地没装 torch 时的常态）。
+
+    判断依据用 `importlib.util.find_spec` —— 只查「装没装」，
+    不真的 import（import torch 要好几秒）。
+    """
+    import importlib.util
+
+    target = model_dir or DEFAULT_MODEL_DIR
+
+    def _has(module: str) -> bool:
+        try:
+            return importlib.util.find_spec(module) is not None
+        except (ImportError, ValueError):
+            return False
+
+    # 三个都必需：
+    #   numpy      —— 结果矩阵
+    #   transformers —— 分词器（**所有后端都要**，ONNX 也一样）
+    #   后端本身   —— onnxruntime 或 torch
+    if not all(_has(m) for m in ("numpy", "transformers")):
+        return False
+    _backend_name, weights = _resolve_backend(target)
+    return _has("onnxruntime") if weights is not None else _has("torch")
+
+
 def available(model_dir: Path | None = None) -> bool:
+    """向量检索能不能用 —— **模型文件在** 且 **推理依赖在**。
+
+    两个条件都要满足：
+      · 模型文件在不在（`config.json` + 权重）
+      · 推理依赖装没装（numpy / transformers / 后端）
+
+    以前只看模型文件，于是「模型在、依赖没装」会被判成可用，
+    一调用就 RuntimeError —— 上层说好的「自动退回纯关键词检索」
+    根本走不到（`_load` 直接抛了）。
+    """
     target = model_dir or DEFAULT_MODEL_DIR
     has_config = (target / "config.json").exists()
     has_weights = (
@@ -53,7 +93,7 @@ def available(model_dir: Path | None = None) -> bool:
         or (target / "model.safetensors").exists()
         or (target / "pytorch_model.bin").exists()
     )
-    return has_config and has_weights
+    return has_config and has_weights and runtime_available(target)
 
 
 def _resolve_backend(target: Path) -> tuple[str, Path | None]:
@@ -124,6 +164,13 @@ def encode(
 
     target = model_dir or DEFAULT_MODEL_DIR
     if not available(target):
+        # 分两种情况说清楚 —— 「模型没下载」和「依赖没装」修法完全不同
+        if not runtime_available(target):
+            raise RuntimeError(
+                "向量推理依赖没装（需要 numpy / transformers / onnxruntime 或 torch）。"
+                "运行 pip install -r core/requirements.txt，"
+                "或用 core/scripts/install_extras.py 单独装。"
+            )
         raise RuntimeError(
             f"向量模型不存在：{target}。运行 core/scripts/fetch_embedding_model.py 下载。"
         )

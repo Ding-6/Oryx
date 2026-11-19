@@ -66,12 +66,14 @@ async def app_state(config, agent, bus) -> dict:
     experts: list[dict[str, Any]] = []
     skills: list[str] = []
     busy = False
+    kernel_ready = True
     try:
         experts = await agent.call_async("catalog.experts")
         skills = await agent.call_async("catalog.skills")
         busy = await agent.call_async("chat.busy")
     except IpcError as exc:
         # 内核没起来也要把页面渲染出来，只是能力清单为空
+        kernel_ready = False
         bus.publish("agent.error", error=str(exc))
 
     from .. import localmodels
@@ -91,6 +93,16 @@ async def app_state(config, agent, bus) -> dict:
         "provider_is_local": localmodels.is_local_provider(cfg),
         "busy": busy,
         "skills": skills,
+        # **内核起没起来**。
+        #
+        # 为什么必须显式告诉前端：内核没就绪时，那些走 RPC 的接口
+        # （团队、工作流…）会全部失败。前端如果照常调，
+        # 首屏就会刷出一排 4xx —— 用户看到的是「页面报错」，
+        # 实际上是「内核还在启动」。
+        #
+        # 有了这个字段，前端能在内核没起来时**先别调**那些接口，
+        # 等它就绪了再补上（refreshState 每 6 秒跑一次，会看到状态翻转）。
+        "kernel_ready": kernel_ready,
     }
 
 

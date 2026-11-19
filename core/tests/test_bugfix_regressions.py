@@ -123,3 +123,48 @@ def test_background_png_accepts_query_token(client):
 
     resp = client.get(f"/api/appearance/background.png?t={API_TOKEN}")
     assert resp.status_code != 401
+
+
+# ── bug 3：「内核未就绪」被当成 400 ──────────────────────────────────
+
+
+def test_kernel_unready_is_503_not_400(client):
+    """内核没就绪是**服务端依赖**的问题，语义上必须是 503。
+
+    报 400 等于告诉前端「你请求写错了」——
+    前端于是把它当用户的错来提示，实际上一行提示都不该弹。
+    """
+    for path in (
+        "/api/teams",
+        "/api/workflows?limit=30",
+        "/api/workflows/failed-count",
+        "/api/workflows/templates",
+    ):
+        resp = client.get(path)
+        assert resp.status_code == 503, f"{path} → {resp.status_code}，应为 503"
+        assert resp.json()["code"] == 503
+
+
+def test_state_reports_kernel_readiness(client):
+    """/api/state 要告诉前端内核起没起来。
+
+    没有这个字段，前端只能照常调那些走 RPC 的接口，
+    首屏控制台就是一排 503 —— 用户以为页面坏了，实际只是内核还在启动。
+    """
+    body = client.get("/api/state").json()
+    assert "kernel_ready" in body
+    # 本测试环境没有内核 → 应该是 false
+    assert body["kernel_ready"] is False
+
+
+def test_kernel_unready_is_not_mixed_with_provider_unready():
+    """「模型服务未就绪」**不能**也算 503。
+
+    那是用户没配 provider —— 要提示他去设置里配，
+    不是「服务端暂时不可用，等会儿再来」。
+    """
+    from oryx.domains._common import is_kernel_unready
+
+    assert is_kernel_unready("Agent 内核未就绪") is True
+    assert is_kernel_unready("模型服务未就绪（没有 provider）。请先在设置里配置") is False
+    assert is_kernel_unready("编排定义有问题") is False

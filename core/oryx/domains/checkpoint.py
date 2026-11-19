@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..agentlink import AgentLink
 from ..ipc import IpcError
+from ._common import is_kernel_unready
 
 router = APIRouter(prefix="/api/checkpoints", tags=["检查点"])
 
@@ -60,6 +61,9 @@ def _call(agent: AgentLink, method: str, **params):
 
 def _map(exc: IpcError) -> HTTPException:
     text = str(exc)
+    # 「内核未就绪」是 503（服务端依赖没就绪），规则与 _common 一致。
+    if is_kernel_unready(text):
+        return HTTPException(503, text)
     if "没有这个检查点" in text:
         return HTTPException(404, text)
     return HTTPException(400, text)

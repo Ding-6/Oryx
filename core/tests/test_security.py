@@ -352,8 +352,13 @@ def test_cors_allows_tauri_origin(client):
     assert response.headers.get("access-control-allow-origin") == "tauri://localhost"
 
 
-def test_background_image_requires_query_token(client):
-    """背景图由 CSS url() 引用，走查询参数传令牌。"""
+def test_background_image_requires_token(client):
+    """背景图必须鉴权 —— 凭据来源与全局一致（cookie / 头 / `?t=` 三选一）。
+
+    以前这条路由**只认 `?t=`** —— 于是 CSS `url()` 引背景图永远 401：
+    浏览器对同源子资源**会**自动带 HttpOnly cookie，中间件其实放行了，
+    是这个路由自己又把 cookie 拒了（根因见 `core/oryx/api/auth.py`）。
+    """
     import base64
     import io
 
@@ -366,10 +371,22 @@ def test_background_image_requires_query_token(client):
     upload = client.post("/api/appearance/background", json={"data_url": data_url})
     assert upload.status_code == 200
 
+    # ① 查询参数
     ok = client.get("/api/appearance/background.png", params={"t": "test-token-1234567890"})
     assert ok.status_code == 200
     assert ok.headers["content-type"] == "image/png"
 
+    # ② 令牌头
+    assert client.get("/api/appearance/background.png").status_code == 200
+
+    # ③ cookie —— CSS url() 走的就是这条
+    client.get("/")   # 首页下发 HttpOnly cookie
+    assert client.cookies.get("oryx_token")
+    assert client.get("/api/appearance/background.png").status_code == 200
+
+    # **一个凭据都没有** → 401
+    client.headers.pop("X-Oryx-Token")
+    client.cookies.clear()
     assert client.get("/api/appearance/background.png").status_code == 401
     assert client.get("/api/appearance/background.png", params={"t": "bad"}).status_code == 401
 

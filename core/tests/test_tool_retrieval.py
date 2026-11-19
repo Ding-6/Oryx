@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from oryx import embeddings
 from oryx.registry import tokenize
 from oryx.tooltable import (
     MUTATING_NAME_HINTS,
@@ -157,6 +158,10 @@ def test_chinese_query_finds_screenshot_tool(runtime):
     assert any("screenshot" in h or "ocr" in h for h in hits), f"没找到截图工具：{hits}"
 
 
+@pytest.mark.skipif(
+    not embeddings.available(),
+    reason="英文查询靠语义召回 —— 没装向量依赖时这条测不了",
+)
 def test_english_query_still_works(runtime):
     hits = _search(runtime, "read file")
     assert "fs_read" in hits, f"英文查询坏了：{hits}"

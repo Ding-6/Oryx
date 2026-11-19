@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from ..agentlink import AgentLink
 from ..ipc import IpcError
+from ._common import is_kernel_unready
 
 router = APIRouter(tags=["自动任务"])
 
@@ -87,6 +88,9 @@ def _call(agent: AgentLink, method: str, **params):
 
 def _map(exc: IpcError) -> HTTPException:
     text = str(exc)
+    # 「内核未就绪」是 503（服务端依赖没就绪），规则与 _common 一致。
+    if is_kernel_unready(text):
+        return HTTPException(503, text)
     if "没有这个" in text:
         return HTTPException(404, text)
     return HTTPException(400, text)

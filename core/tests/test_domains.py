@@ -24,15 +24,17 @@ def test_session_actions_are_pure_functions(tmp_path):
     task_id = store.create_task("目标", "craft", "p")
     store.add_message(task_id, "user", "你好")
 
+    # v2：列表的领域对象**就是数组**，不再多包一层 {"sessions": [...]}
     listed = session.list_sessions(store)
-    assert len(listed["sessions"]) == 1
+    assert isinstance(listed, list)
+    assert len(listed) == 1
 
     detail = session.read_session(store, task_id)
     assert detail["task"]["id"] == task_id
     assert detail["messages"][0]["content"] == "你好"
 
     assert session.delete_session(store, task_id) == {"deleted": task_id}
-    assert session.list_sessions(store)["sessions"] == []
+    assert session.list_sessions(store) == []
 
 
 def test_session_read_missing_raises_404(tmp_path):
@@ -292,6 +294,7 @@ EXPECTED_DOMAINS = [
     "appearance", "feature", "memory", "remote", "ui", "extension",
     "tools", "mcp", "file", "persona", "team", "index",
     "preference", "chat", "app", "system",
+    "overview",
 ]
 EXPECTED_PREFIXES = {
     "/api/sessions", "/api/providers", "/api/skills", "",
@@ -299,7 +302,7 @@ EXPECTED_PREFIXES = {
     "/api/appearance", "/api/features", "/api/memory", "/api/remote",
     "/api/ui", "/api/extensions", "/api/ui-extensions",
     "/api/tools", "/api/mcp", "/api/files", "/api/workspace", "/api/doc",
-    "/api/teams",
+    "/api/teams", "/api/overview",
     # persona 域管**多个**前缀（/api/persona、/api/expert、/api/experts、
     # /api/agents），index 域也是（/api/index、/api/drives、/api/images）——
     # 所以它们的 router 用 `/api` 前缀 + tag 区分。
@@ -354,6 +357,8 @@ def test_key_paths_are_reachable():
         # 最后一批
         "/api/state", "/api/chat", "/api/apps", "/api/prewarm",
         "/api/doctor", "/api/fs/list", "/api/approve", "/api/interaction",
+        # 大屏（多 Agent 一屏总览）
+        "/api/overview/teams", "/api/overview/runs", "/api/overview/suggestions",
     ):
         assert p in paths, f"关键路径不见了：{p}"
 
@@ -395,7 +400,8 @@ def test_server_session_rename_route(tmp_path):
         r = client.put(f"/api/sessions/{task}", json={"title": "改过的名字"},
                        headers=put_headers)
         assert r.status_code == 200, r.text
-        listed = client.get("/api/sessions", headers=headers).json()["sessions"]
+        # v2 统一响应：领域数据在 data 里，列表本身就是数组
+        listed = client.get("/api/sessions", headers=headers).json()["data"]
         item = next(s for s in listed if s["id"] == task)
         assert item["title"] == "改过的名字", str(item)
         assert item["renamed"] is True
@@ -403,6 +409,7 @@ def test_server_session_rename_route(tmp_path):
         # 清空名字 → 退回用提问当标题
         r = client.put(f"/api/sessions/{task}", json={"title": ""}, headers=put_headers)
         assert r.status_code == 200
-        listed = client.get("/api/sessions", headers=headers).json()["sessions"]
+        # v2 统一响应：领域数据在 data 里，列表本身就是数组
+        listed = client.get("/api/sessions", headers=headers).json()["data"]
         item = next(s for s in listed if s["id"] == task)
         assert item["title"] == "原始目标", str(item)
