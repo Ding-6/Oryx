@@ -5,7 +5,7 @@
 > - **来源**：不是拍脑袋设计的 —— 由我逐条读 `core/oryx/domains/*.py` 的实现反推，
 >   并用运行时实测交叉验证（装配 FastAPI 后真发请求）。
 >   每条都标了来源文件与行号，便于你核对，也便于重写时对照。
-> - **状态**：**待侯哥审阅**。审阅通过后按它重写；不通过的地方以你的意见为准。
+> - **状态**：**§4.2 的五个问题已拍板（2026-11-19）**；session 域与大屏三接口已按本文改造落地。
 > - **采集日期**：2026-11-19 ／ 代码基线 `9f6e219` + `c122b79` + `8d434f6`
 
 ---
@@ -20,6 +20,7 @@
 |---|---|
 | 放行路径 | `/`、`/api/ping`、`/favicon.ico`，以及**所有** `/web/` 开头的路径 |
 | 令牌来源（三选一） | cookie `oryx_token`（HttpOnly，首页下发）→ `X-Oryx-Token` 头 → `?t=` 查询参数 |
+| 取法 | 统一在 `core/oryx/api/auth.py::resolve_token_candidate` —— 中间件与域内路由共用（见 §4.3） |
 | 401 | `{"detail": "缺少或错误的访问令牌（X-Oryx-Token）"}` |
 | 403（跨源 cookie） | `{"detail": "跨源请求不接受 cookie 鉴权"}` |
 | 403（缺来源标记） | `{"detail": "缺少来源标记（x-oryx-request: 1）"}` —— 仅非 `GET/HEAD/OPTIONS` 生效 |
@@ -34,10 +35,21 @@
 
 | 映射函数 | 位置 | 规则 |
 |---|---|---|
-| `rpc_failure` | `domains/_common.py:19` | 含「已有扫描/扫描进行中/已释放」→ **409**；含「没有这个/不在/已被」→ **404**；其余 → **400** |
-| `_map`（workflow） | `domains/workflow.py:158` | 含「没有这次运行/没有正在跑/没有这个模板」→ **404**；其余 → **400** |
-| `_map`（checkpoint） | `domains/checkpoint.py:61` | 含「没有这个检查点」→ **404**；其余 → **400** |
-| `_map`（schedule） | `domains/schedule.py:88` | 含「没有这个」→ **404**；其余 → **400** |
+| `rpc_failure` | `domains/_common.py:19` | 含「内核未就绪」→ **503**；含「已有扫描/扫描进行中/已释放」→ **409**；含「没有这个/不在/已被」→ **404**；其余 → **400** |
+| `_map`（workflow） | `domains/workflow.py:158` | 含「内核未就绪」→ **503**；含「没有这次运行/没有正在跑/没有这个模板」→ **404**；其余 → **400** |
+| `_map`（checkpoint） | `domains/checkpoint.py:61` | 含「内核未就绪」→ **503**；含「没有这个检查点」→ **404**；其余 → **400** |
+| `_map`（schedule） | `domains/schedule.py:88` | 含「内核未就绪」→ **503**；含「没有这个」→ **404**；其余 → **400** |
+
+> **「内核未就绪」为什么是 503 而不是 400**
+> ----------------------------------------
+> 内核没就绪是**服务端依赖**的问题，不是请求的问题 ——
+> 用户的请求完全正确，只是 Agent 内核还在启动（或崩了正在重启）。
+> 报 400 等于告诉前端「你请求写错了」，前端于是把它当用户的错来提示。
+>
+> 实测后果：内核没起来时首屏会连打 4 个 400
+> （`/api/teams`、`/api/workflows` 三条），控制台一片红。
+> 现在改成 503，并且 `/api/state` 会报 `kernel_ready`，
+> 前端在内核就绪前**不调**那些接口（见 §4.3）。
 
 **v2 目标**：统一成一套 —— 见 §1。
 
@@ -68,9 +80,18 @@ class Response(BaseModel, Generic[T]):
     message: str = ""
 ```
 
-- HTTP 状态码仍按语义给（400/403/404/409/422/500），**不靠 body 里的 code 表达错误**
-- `data` 恒为该接口的领域对象；列表类接口的 `data` 恒为数组（不要 `{"sessions": [...]}` 这种包一层）
+- HTTP 状态码仍按语义给（400/403/404/409/422/503/500），**不靠 body 里的 code 表达错误**
+- `data` 恒为该接口的**领域对象**。具体形状分三种：
+
+  | 领域对象是什么 | `data` 的形状 | 例子 |
+  |---|---|---|
+  | 一个列表 | **数组** | `GET /api/sessions` → `Session[]`（**不是** `{"sessions": [...]}`） |
+  | 一个带上下文的对象 | **对象** | `GET /api/sessions/{id}` → `{task, title, messages, steps, todos, usage}` |
+  | 一屏聚合视图 | **对象**（视图内的列表字段用复数命名） | `GET /api/overview/runs` → `{runs, total, active, today, window}` |
+
+- 多包一层没有信息量，前端却要为此多写一次 `.sessions` —— 不包。
 - 分页统一：`{"items": [...], "total": int, "limit": int, "offset": int}`
+  （`total` 是**全量**条数，不是本页条数）
 
 ### 1.2 命名规范
 
@@ -93,6 +114,7 @@ class Response(BaseModel, Generic[T]):
 | 资源不存在 | 404 | 404 |
 | 状态冲突（重复/在跑） | 409 | 409 |
 | 参数模式不匹配 | 422 | 422 |
+| 依赖未就绪（内核没起来） | 503 | 503 |
 | 服务端异常 | 500 | 500 |
 
 ---
@@ -138,16 +160,30 @@ class Response(BaseModel, Generic[T]):
 
 ### 2.4 session 域（`domains/session.py`，prefix `/api/sessions`）
 
-| 方法 | 路径 | 入参 | 出参 | 错误 | 前端用 |
+> **v2 样板域** —— 第一个按新契约改的域。
+> 契约层（pydantic）+ 统一响应 + 前端接入三件事都在这里跑通了，
+> 其余 21 个域照这个改。
+> 契约测试：`core/tests/test_session_contract.py`（18 条）。
+
+| 方法 | 路径 | 入参 | `data` | 错误 | 前端用 |
 |---|---|---|---|---|---|
-| GET | `/api/sessions` | q: `limit: int=50` | `sessions[]`（键 `id goal title status mode provider created_at updated_at msg_count step_count todo_open renamed`） | — | 是 |
-| GET | `/api/sessions/{task_id}` | path: `task_id: str` | `task` `title` `messages[]` `steps[]` `todos[]` `usage{calls,input_tokens,output_tokens}` | 404「没有这个会话」 | 是 |
-| DELETE | `/api/sessions/{task_id}` | path | `deleted` | 404「没有这个会话」 | 是 |
-| PUT | `/api/sessions/{task_id}` | body: `req: dict`，读 `title` | `renamed` `title` | 404「没有这个会话」 | 是 |
-| PUT | `/api/sessions/{task_id}/todos/{todo_id}` | path ×2；body: `req: dict`，读 `status` | `updated` `todo` | **400**「status 只能是 pending / in_progress / done」；404「没有这个待办」 | 是 |
-| GET | `/api/sessions/{task_id}/steps` | path | `task_id` `steps[]` | — | **否** |
-| GET | `/api/sessions/{task_id}/todos` | path | `task_id` `todos[]` `count` | — | **否** |
-| GET | `/api/sessions/{task_id}/usage` | path | `task_id` `usage{}` `steps:int` `todos:int` `messages:int` | 404 | **否** |
+| GET | `/api/sessions` | q: `limit: int=50`（上限 200） | **数组** `Session[]`（键 `id goal title status mode provider created_at updated_at msg_count step_count todo_open renamed`） | — | 是 |
+| GET | `/api/sessions/{task_id}` | path: `task_id: str` | **对象** `{task, title, messages[], steps[], todos[], usage{calls,input_tokens,output_tokens}}` | 404「没有这个会话」 | 是 |
+| DELETE | `/api/sessions/{task_id}` | path | **对象** `{deleted}` | 404「没有这个会话」 | 是 |
+| PUT | `/api/sessions/{task_id}` | body: `RenameRequest{title: str=""}`（null 归一成空串） | **对象** `{renamed, title}` | 404「没有这个会话」；422（title 不是字符串） | 是 |
+| PUT | `/api/sessions/{task_id}/todos/{todo_id}` | path ×2；body: `TodoStatusRequest{status: str}` | **对象** `{updated, todo}` | **400**「status 只能是 pending / in_progress / done」；404「没有这个待办」；422（缺 status / 类型不对） | 是 |
+| GET | `/api/sessions/{task_id}/steps` | path | **数组** `Step[]` | — | **否** |
+| GET | `/api/sessions/{task_id}/todos` | path | **数组** `Todo[]` | — | **否** |
+| GET | `/api/sessions/{task_id}/usage` | path | **对象** `{task_id, usage{}, steps:int, todos:int, messages:int}` | 404 | **否** |
+
+**改名语义**：`title` 传空串**或**不传 = 撤掉自定义名字（退回用首条提问当标题）。
+这是 PUT 的自然语义（「把标题换成这个」），所以 `title` 有默认值而不是必填。
+
+**契约层做了什么**
+- `null` 归一成空串 —— 以前 `str(req.get("title"))` 会把字面量 `"None"` 存成会话名
+- 类型收紧 —— `{"title": 123}` 现在是 422，不是静默存成 `"123"`
+- 状态值仍在业务层校验（400 + 中文提示）—— 用 `Literal` 会变成 422，
+  错误体里只剩字段路径和英文校验消息，用户看到的是机器话
 
 ### 2.5 chat 域（`domains/chat.py`，prefix `/api`）
 
@@ -357,7 +393,32 @@ class Response(BaseModel, Generic[T]):
 
 > 注：本域**没有**用 `rpc_failure`（不调内核），错误直接是 `HTTPException`。
 
-### 2.23 server.py 自身路由
+### 2.23 overview 域（`domains/overview.py`，prefix `/api/overview`）
+
+> **大屏（多 Agent 一屏总览）的服务端真相接口。**
+> 大屏此前**一个接口都不调** —— 纯渲染 SSE 攒出来的内存状态，
+> 刷新一下页面总览就空了。这三个接口是那个取口。
+> 前端仍然 SSE 驱动（实时性靠它），这三个接口负责**冷启动与恢复**：
+> SSE 说「现在」，接口说「本来」。
+
+| 方法 | 路径 | 入参 | `data` | 错误 | 前端用 |
+|---|---|---|---|---|---|
+| GET | `/api/overview/teams` | — | **对象** `{teams[], team_count, member_count, agents[], agent_count, degraded[]}` | —（内核没起来时**降级**成空列表，不是 503） | 是（新前端） |
+| GET | `/api/overview/runs` | q: `limit: int=20`（上限 100） | **对象** `{runs[], window, total, active, today}` | — | 是（新前端） |
+| GET | `/api/overview/suggestions` | q: `task_id: str=""` | **对象** `{suggestions[], count, source{task_id,title,status,steps,artifacts[],artifact_count}}` | — | 是（新前端） |
+
+**几个刻意的决定**
+
+- `total` / `active` / `today` 走**库里的聚合查询**，不是前端从列表数出来的 ——
+  列表限量 20，数出来是「最近 20 个里有几个」，不是「一共跑了多少」。
+- 内核没起来时 `teams` 降级成空列表并把原因写进 `degraded` ——
+  大屏是锦上添花的视图，它挂了不该拖垮整屏。
+- 建议走**确定性规则**（按产物后缀查表），不调模型 ——
+  建议必须可执行、路径明确、可回归；模型容易编出不存在的文件名。
+
+---
+
+### 2.24 server.py 自身路由
 
 | 方法 | 路径 | 入参 | 出参 | 错误 | 前端用 |
 |---|---|---|---|---|---|
@@ -415,23 +476,67 @@ class Response(BaseModel, Generic[T]):
 | `DELETE /api/extensions/{ext_id}` `DELETE /api/ui-extensions/{ext_id}` | **前端在用**（`models.js:5562`），只是被上面的变量解析误判过 —— 现已确认在用 |
 | `POST /api/extensions/{ext_id}/enable` `…/disable` | 同上，确认在用 |
 
-### 4.2 需要你拍板的
+### 4.2 需要你拍板的（**2026-11-19 已拍板**）
 
-| # | 问题 |
-|---|---|
-| 1 | **`/api/files/list` 删还是接？** 它是递归清单，`/api/fs/list` 是单层浏览器 —— 功能不同 |
-| 2 | **`/api/index/library`（单数）删还是接？** 它是 `/api/index/libraries` 的下钻视图 |
-| 3 | **大屏（多 Agent 一屏总览）要哪些新接口？** 现在它**不调任何接口**，纯渲染已有状态 → 建议加 `/api/overview/teams` `/api/overview/runs` `/api/overview/suggestions` 三个 |
-| 4 | **统一响应体要不要包 `code`/`message`？** 会破坏现有 195 个前端调用点 —— 但这是「全推倒重写」的一部分 |
-| 5 | **旧路径要不要兼容期？** |
+| # | 问题 | 决定 | 落地情况 |
+|---|---|---|---|
+| 1 | `/api/files/list` 删还是接？ | **接**（保留） | 递归清单与 `/api/fs/list`（单层浏览）功能不同，两个都留 |
+| 2 | `/api/index/library`（单数）删还是接？ | **接**（保留） | 它是 `/api/index/libraries` 的下钻视图 |
+| 3 | 大屏要哪些新接口？ | **加三个** | ✅ `/api/overview/{teams,runs,suggestions}` 已实现（§2.23） |
+| 4 | 统一响应体要不要包 `code`/`message`？ | **要**，逐域改造 | ✅ session 域已改（§2.4）；错误体**保留 `detail`** 兼容旧前端 |
+| 5 | 旧路径要不要兼容期？ | **不设**（全推倒） | 已改的域直接换契约，前端同步改；未改的域保持原样 |
+
+### 4.3 顺带修掉的两个问题
+
+这一轮是「写接口 + 做样域版 + 修问题」，问题清单里有两处是**实测复现**的：
+
+**① 背景图永远加载不出来（401）**
+
+- **症状**：设了背景图，界面上一片空白。
+- **根因不在前端**：是后端 `GET /api/appearance/background.png` **自己**又校验了一遍令牌，
+  且只认 `?t=`。浏览器对同源 CSS 子资源**会**自动带 HttpOnly cookie，
+  中间件其实已经放行了 —— 被域里那道多余的校验挡了回来。
+- **上一轮记的修法是错的**：「前端补上 `?t=`」走不通 ——
+  令牌早就不在 JS 里了（`ORYX_TOKEN` 已移除），补不出来。
+- **修法**：新增 `core/oryx/api/auth.py`，三个凭据来源（cookie / 头 / `?t=`）的取法统一；
+  中间件与域内路由共用，避免「中间件放行、域里又拒」。
+
+**② 「内核未就绪」被当成 400**
+
+- **症状**：内核没起来时首屏连打 4 个 400，控制台一片红，
+  用户以为页面坏了 —— 实际只是内核还在启动。
+- **根因**：内核没就绪是**服务端依赖**的问题，请求本身完全正确。报 400 等于说「你写错了」。
+- **修法**：
+  - 四套 IPC 映射规则统一加上「内核未就绪 → **503**」（§0.2）
+  - `/api/state` 新增 `kernel_ready` 字段
+  - 前端在内核就绪前**不调**那些走 RPC 的接口；
+    `refreshState` 每 6 秒跑一次，状态一翻转就自动补上数据（不丢东西）
 
 ---
 
-## 5. 重写顺序建议
+## 5. 重写顺序与进度
 
 按「先地基后业务、每个模块完成即确认」：
 
-1. **地基**（本轮已在做）：依赖清单 ✅、未定义名守卫 ✅、接口对齐守门工具 ✅、统一响应 + 全局异常 + 日志、契约层骨架
-2. **先做 1 个域当样板** —— 建议 `session`（最简单、8 条路由、无 IPC 依赖），把「契约层 + 统一响应 + 前端接入」的完整链路跑通
-3. 其余 21 个域照样板铺开
-4. **大屏**最后做（它依赖多个域的接口）
+| 步骤 | 内容 | 状态 |
+|---|---|---|
+| 1 | **地基**：依赖清单、未定义名守卫、接口对齐守门工具、统一响应 + 全局异常 + 日志、质量闸门、CI | ✅ 2026-11-19 |
+| 2 | **样板域 `session`**：契约层 + 统一响应 + 前端接入，整条链路跑通 | ✅ 2026-11-19 |
+| 3 | **大屏三接口**：`/api/overview/{teams,runs,suggestions}` | ✅ 2026-11-19 |
+| 4 | 其余 21 个域照样板铺开 | ⬜ 待做 |
+| 5 | 老前端整页替换为新前端（React 19 + TS + Tailwind v4） | 🔄 进行中（新外壳已接 session 域 + 大屏） |
+
+**样板的形状**（其余域照这个改）
+
+```
+core/oryx/domains/session.py
+  ├── 请求体：pydantic 模型（不再是 req: dict）
+  ├── null 归一：validator 把 None 变成空串
+  ├── 响应：api/response.py 的 ok() → {code, data, message}
+  └── 契约测试：core/tests/test_session_contract.py
+
+apps/web/src/
+  ├── lib/types.ts        —— 类型从后端代码反推
+  ├── lib/api.ts          —— 客户端自动剥壳（api.get 直接给领域对象）
+  └── features/sessions/  —— api.ts + SessionList.tsx + SessionDetail.tsx
+```

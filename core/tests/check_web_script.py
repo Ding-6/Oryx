@@ -374,8 +374,13 @@ def main() -> int:
         "function tlAgentStarted",             # 派活提示
         "case 'team.member.started'",          # 派活事件接线
         "case 'subagent.finished'",            # 子 Agent 结论事件接线
-        "class=\"railcard\"",                  # 左栏毛玻璃卡片
-        "backdrop-filter:blur(25px)",         # 毛玻璃模糊度（对标 Marvis）
+        "class=\"railcard\"",                  # 左栏卡片容器
+        # 左栏的毛玻璃换成了「淡紫面板」——
+        # 第十一批做的是 backdrop-filter:blur(25px)，第十二批左栏重做时改掉了：
+        # 面板本体不再是独立卡片（background:transparent），而是和 #rail 同一块底。
+        # 断言要跟着设计走 —— 留着旧标记的话，它只会在设计早已改掉之后一直报错。
+        ".railcard {",                        # 左栏卡片容器（CSS 侧）
+        "background:var(--panel);",           # 左栏底色是淡紫面板
         "function sessGroup",                  # 会话按时间分组
         "function sessStatus",                 # 会话状态标记
         "id=\"tpSwitch\"",                      # 团队切换器
@@ -387,7 +392,12 @@ def main() -> int:
         "function ucConfirm",                  # 危险操作确认弹窗
         "class=\"uc\"",                         # 统一卡片样式
         ".grid.ucgrid",                        # 统一卡片网格
-        "-webkit-line-clamp:2",                # 描述折叠到两行
+        # 描述折叠到两行 —— 但**不再用** `-webkit-line-clamp`。
+        # Edge 157 起 `display:-webkit-box` 被规范化成 flow-root，
+        # 基于 box 布局的 `-webkit-line-clamp` 全线失效（硬切、没有省略号）。
+        # 现在改成 JS 测量高度 + `.is-clipped` 打标记，由 CSS 画省略号。
+        "function applyClamp",                 # 折叠高度测量
+        ".clamp2.is-clipped::after",           # 折叠时画省略号
         "在对话中使用",                        # 统一文案
         "function setLocalOpen",               # 本地资料浮层
         "position:fixed; z-index:120",         # 浮层（不能被 railcard 裁掉）
