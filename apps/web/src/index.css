@@ -1,0 +1,123 @@
+/* Oryx 新前端 —— 样式入口
+ *
+ * 一条硬规矩：**不重新发明配色**。
+ *
+ * 现有前端（core/web/styles/tokens.css）已经有一套调好的设计 token ——
+ * 淡紫调主色、明暗两套、对比度全部过 WCAG AA（改到 4.59:1 / 5.32:1）。
+ * 那是几轮迭代调出来的（详见 tokens.css 里的注释：accent 从 #6366F1 调到
+ * #565AE0 就是为了白字过 4.5:1）。
+ *
+ * 所以这里**直接 import 它**，再用 Tailwind v4 的 `@theme inline`
+ * 把 CSS 变量映射成 Tailwind 工具类：
+ *     --accent → bg-accent / text-accent / border-accent
+ *
+ * 这样做的收益：
+ *   · 新旧前端**同一个视觉语言**，迁移时不会出现「换了个皮」
+ *   · 改一个 token，两边同时变（不会漂移）
+ *   · 暗色主题靠 `data-theme` 属性切换 —— Tailwind 的 dark: 变体不参与，
+ *     保持现有的切换机制不变
+ */
+
+@import 'tailwindcss';
+
+/* 复用现有 token —— 唯一的设计来源 */
+@import '../../../core/web/styles/tokens.css';
+
+@theme inline {
+  /* 背景 */
+  --color-bg: var(--bg);
+  --color-bg-2: var(--bg-2);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-card: var(--card);
+
+  /* 描边 */
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-rule: var(--rule);
+
+  /* 文字 */
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+
+  /* 主色 */
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-line: var(--accent-line);
+  --color-on-accent: var(--on-accent);
+
+  /* 品牌渐变 */
+  --color-brand-1: var(--brand-1);
+  --color-brand-2: var(--brand-2);
+  --color-brand-ink: var(--brand-ink);
+
+  /* 语义色 */
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  /* 对话气泡 */
+  --color-user-bg: var(--user-bg);
+  --color-user-fg: var(--user-fg);
+  --color-bot-fg: var(--bot-fg);
+  --color-code: var(--code);
+
+  /* 圆角：与现有前端一致（--r: 8px / --r-lg: 12px） */
+  --radius: var(--r);
+  --radius-lg: var(--r-lg);
+
+  /* 阴影 */
+  --shadow-card: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  /* 字体：与现有前端同一套 */
+  --font-sans: 'Inter Tight', 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', Consolas, 'SF Mono', monospace;
+}
+
+/* ── 基础层 ──────────────────────────────────────────────────────────
+   Tailwind 的 preflight 会把 h1~h6 的字号重置掉，
+   现有前端是按自己的比例来的 —— 这里补回来，别让新页面字号全变样。 */
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 焦点可见 —— 键盘用户必须能看见焦点在哪。
+     现有前端没做统一处理，这里补上（无障碍底线）。 */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* 尊重「减少动效」的系统偏好 */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

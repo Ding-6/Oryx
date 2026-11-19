@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Oryx</title>
+    <!-- 令牌不在 JS 里 —— 走 HttpOnly cookie（见 core/oryx/server.py 的 / 路由）。
+         这个 meta 只为「刷新后第一帧不要闪白」占位，没有安全含义。 -->
+    <meta name="description" content="Oryx —— 本地智能体工作台" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

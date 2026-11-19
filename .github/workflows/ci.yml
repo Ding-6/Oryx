@@ -63,3 +63,29 @@ jobs:
       - name: 桌面壳单测
         working-directory: apps/desktop/src-tauri
         run: cargo test --release
+
+  new-frontend:
+    # 新前端（React 19 + TS + Tailwind v4）。
+    # 与老前端并存 —— 老前端还在跑，这条 job 只保证新前端能构建、类型干净。
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: 安装依赖
+        working-directory: apps/web
+        run: npm ci
+
+      - name: 类型检查
+        working-directory: apps/web
+        run: npm run typecheck
+
+      - name: 构建
+        working-directory: apps/web
+        run: npm run build
