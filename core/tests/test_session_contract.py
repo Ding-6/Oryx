@@ -19,7 +19,9 @@
 
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -27,8 +29,16 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+# 临时目录建在**测试专用的根目录**下（conftest 已把它指到 D 盘），
+# 而且用完删掉 —— 以前直接 mkdtemp 到 %TEMP%（C 盘），
+# 建完从不管，每次跑测试都在 C 盘留一个孤儿目录。
+# 临时目录建在**测试专用的根目录**下（conftest 已把它指到 D 盘），
+# 而且用完删掉 —— 以前直接 mkdtemp 到 %TEMP%（C 盘），
+# 建完从不管，每次跑测试都在 C 盘留一个孤儿目录。
 _TMP_HOME = Path(tempfile.mkdtemp(prefix="oryx-session-"))
 os.environ.setdefault("ORYX_HOME", str(_TMP_HOME))
+atexit.register(lambda: shutil.rmtree(_TMP_HOME, ignore_errors=True))
+atexit.register(lambda: shutil.rmtree(_TMP_HOME, ignore_errors=True))
 
 
 @pytest.fixture(scope="module")

@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import d_env  # noqa: E402  （同目录脚本，单独跑时也能 import）
 import argparse
 import os
 import shutil
@@ -41,12 +42,26 @@ BUNDLE = RELEASE / "bundle" / "nsis"
 
 
 def _cargo() -> str | None:
-    """找 cargo —— 装了 rustup 但没加进 PATH 时也能找到。"""
+    """找 cargo —— 装了 rustup 但没加进 PATH 时也能找到。
+
+    候选路径要包括 **CARGO_HOME** ——
+    工具链搬到 D 盘后（CARGO_HOME=D://OryxData//cache//cargo），
+    老的 %USERPROFILE%\.cargo 路径已经不存在了。
+    只认 PATH 和老路径的话，这里会误报「Rust 工具链没装」。
+    """
     found = shutil.which("cargo")
     if found:
         return found
-    home = Path(os.environ.get("USERPROFILE", "")) / ".cargo" / "bin" / "cargo.exe"
-    return str(home) if home.exists() else None
+    candidates = []
+    cargo_home = os.environ.get("CARGO_HOME")
+    if cargo_home:
+        candidates.append(Path(cargo_home) / "bin" / "cargo.exe")
+    candidates.append(Path(os.environ.get("USERPROFILE", "")) / ".cargo" / "bin" / "cargo.exe")
+    candidates.append(d_env.CACHE_ROOT / "cargo" / "bin" / "cargo.exe")
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return None
 
 
 NEW_WEB = DESKTOP.parent / "web"
@@ -134,6 +149,9 @@ def run(cmd: list[str], cwd: Path, label: str) -> int:
     print(f"\n=== {label} ===")
     print("  " + " ".join(cmd))
     env = dict(os.environ)
+    # 缓存一律指到 D 盘 —— npm/cargo/pip 默认都往 C 盘写，
+    # 一次构建就能在 C 盘堆出几百 MB。用户要求所有内容放 D 盘。
+    _d_env.apply(env)
     cargo = _cargo()
     if cargo:
         env["PATH"] = str(Path(cargo).parent) + os.pathsep + env.get("PATH", "")

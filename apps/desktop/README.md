@@ -113,6 +113,55 @@ pip install fastapi uvicorn httpx pyyaml pillow cryptography python-docx openpyx
 # 可选：playwright（浏览器 Agent）、rapidocr-onnxruntime（OCR）、torch+transformers（向量检索）
 ```
 
+## 落在哪个盘
+
+**全部在 D 盘。** 用户明确要求「所有内容放 D 盘」（C 盘经常被塞满）。
+
+### 应用运行时
+
+由 `paths.rs` 统一钉住（数据根 = `D://OryxData`）：
+
+| 内容 | 位置 | 大小量级 |
+|---|---|---|
+| 配置 / 会话库 / 内容索引 / 模型 | `D://OryxData//data` | ~270 MB |
+| WebView2 profile（Tauri 的 webview 数据） | `D://OryxData//tauri` | ~83 MB |
+| 日志 | `D://OryxData//logs` | 小 |
+| 临时目录（内核的 TMPDIR/TEMP/TMP） | `D://OryxData//temp` | 小 |
+| pip / npm / HF / torch / playwright 缓存 | `D://OryxData//cache//*` | ~720 MB |
+
+### 构建 / 开发时
+
+**构建过程本身也会往 C 盘写一堆东西**，这些不归应用管，但一样占用户的盘：
+
+    npm install @tauri-apps/cli   → %LOCALAPPDATA%\npm-cache      （~500 MB）
+    cargo build                   → %USERPROFILE%\.cargo\registry（~850 MB）
+    pip install                   → %LOCALAPPDATA%\pip\Cache      （~560 MB）
+
+所以：
+
+- **用户级环境变量**已经设好（`PIP_CACHE_DIR` / `npm_config_cache` /
+  `CARGO_HOME` / `RUSTUP_HOME` / `XDG_CACHE_HOME` / `HF_HOME` / `TORCH_HOME` /
+  `PLAYWRIGHT_BROWSERS_PATH`），新开的 shell 自动继承。
+- **`scripts/d_env.py`** 在构建脚本里**再显式设一遍** —— 不能只指望环境变量：
+  从旧 shell 启动、或别人 unset 了，就又漏回 C 盘。
+- **测试的临时目录**也放 D 盘（`tests/conftest.py` 把 `tempfile.tempdir`
+  指到 `D://OryxData//tmp`）—— 以前每跑一次测试就在 C 盘 `%TEMP%` 留一批孤儿目录。
+
+### 别的 AI 工具
+
+Codex / DSH 这类工具的运行时缓存也在 C 盘上（合计约 3.5 GB）。
+搬它们用 `scripts/relocate_caches.py` —— **先复制、再换目录、最后留联接**：
+
+    python apps/desktop/scripts/relocate_caches.py --move      # 复制（不动原目录，零风险）
+    # 关掉占用它们的程序
+    python apps/desktop/scripts/relocate_caches.py --finish    # 换目录 + 建联接 + 删原目录
+
+**为什么留联接而不是只设环境变量**：设 `CODEX_HOME` 只在那个程序**确实认**它时
+才管用（官方 MSIX 安装在 `WindowsApps` 下，还读不了二进制确认）。
+联接是文件系统层面的 —— 程序照旧按原路径访问，实际读写的是 D 盘。
+
+**为什么分两步**：目录被进程占着时 Windows 不让改名，也就建不了联接。
+
 ## 行为说明
 
 - 如果 **8765 端口已有内核在跑**，直接复用，不会重复启动。

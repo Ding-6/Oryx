@@ -43,6 +43,36 @@ _TESTS_DIR = Path(__file__).resolve().parent
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
+# ── 0. 测试的临时目录也放 D 盘 ─────────────────────────────────────
+#
+# %TEMP% 在 C 盘。测试每跑一次就要建一批临时目录
+# （每个 oryx-test-home-<pid>、每个 mkdtemp 的 oryx-session-*…），
+# 跑完还不一定删得干净 —— 一次全量测试就能在 C 盘堆出几百 MB 残留。
+#
+# 用户明确要求「所有内容放 D 盘」。这里把 tempfile 的根目录换掉，
+# 于是**所有** mkdtemp / gettempdir 都落到 D。
+def _test_tmp_root() -> Path:
+    """测试临时目录的根 —— 优先 D 盘，没有 D 盘才退回系统临时目录。"""
+    override = os.environ.get("ORYX_TEST_TMP")
+    if override:
+        root = Path(override)
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+    for cand in (Path("D:/OryxData/tmp"),):
+        try:
+            cand.mkdir(parents=True, exist_ok=True)
+            return cand
+        except OSError:
+            continue
+    return Path(tempfile.gettempdir())
+
+
+_TMP_ROOT = _test_tmp_root()
+# tempfile.tempdir 是 gettempdir()/mkdtemp() 的实际落点 ——
+# 设了它，下面所有 mkdtemp 都跟着走。
+tempfile.tempdir = str(_TMP_ROOT)
+
+
 # ── 1. 把 ORYX_HOME 指到临时目录 ──────────────────────────────────
 # 必须在任何 oryx 模块被导入之前做。
 #
@@ -55,7 +85,7 @@ if str(_TESTS_DIR) not in sys.path:
 # 而且**只在全量跑时偶发**，单跑那个文件永远绿，极难定位。
 #
 # 改成带 pid 的唯一目录后，每个进程只删自己那份，互不影响。
-_TEST_HOME = Path(tempfile.gettempdir()) / f"oryx-test-home-{os.getpid()}"
+_TEST_HOME = _TMP_ROOT / f"oryx-test-home-{os.getpid()}"
 _TEST_HOME.mkdir(parents=True, exist_ok=True)
 os.environ["ORYX_HOME"] = str(_TEST_HOME)
 
