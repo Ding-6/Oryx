@@ -12,10 +12,10 @@
       {
         "label": "main",
         "title": "Oryx",
-        "width": 1440,
-        "height": 900,
+        "width": 1520,
+        "height": 940,
         "minWidth": 880,
-        "minHeight": 560,
+        "minHeight": 600,
         "center": true,
         "resizable": true,
         "visible": true

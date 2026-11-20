@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use tauri::{Manager, RunEvent};
 
 mod paths;
+mod winstate;
 
 const DEFAULT_PORT: u16 = 8765;
 const BACKEND_START_TIMEOUT: Duration = Duration::from_secs(25);
@@ -230,6 +231,94 @@ fn main() {
 
     builder
         .setup(move |app| {
+            // 恢复上次窗口的大小与位置。
+            //
+            // 为什么要有：桌面应用每次都按固定尺寸打开，用户调好的窗口
+            // 下次就没了 —— 明明刚拖到舒服的位置，关掉再开又弹回默认。
+            //
+            // 位置要**先验证还在屏幕上**：显示器拔了/换了分辨率之后，
+            // 存下来的坐标可能落在屏幕外 —— 那样窗口会开在看不见的地方，
+            // 用户还以为应用坏了。所以落在外面就只恢复大小，位置交回系统居中。
+            if let Some(window) = app.get_webview_window("main") {
+                if let Some(st) = winstate::load(&data_root) {
+                    let monitors = window.available_monitors().unwrap_or_default();
+                    let visible = winstate::position_visible(
+                        &monitors,
+                        st.x,
+                        st.y,
+                        st.width,
+                        st.height,
+                    );
+                    let _ = window.set_size(tauri::PhysicalSize::new(st.width, st.height));
+                    if visible {
+                        let _ = window.set_position(tauri::PhysicalPosition::new(st.x, st.y));
+                    } else {
+                        let _ = window.center();
+                    }
+
+                    // **把实际生效的几何回写**。
+                    //
+                    // 两个理由：
+                    //   1. 系统可能把请求的尺寸**夹**到工作区范围内（比如用户
+                    //      接了个 4K 屏又换回 1080p），回写之后存档才与现实一致；
+                    //   2. 它是「恢复有没有生效」的**可观测证据** ——
+                    //      没有这一步，存档里的值永远只是「我们请求的值」，
+                    //      恢复失败也看不出来。
+                    if let (Ok(size), Ok(pos)) = (window.outer_size(), window.outer_position())
+                    {
+                        let actual = winstate::WindowState {
+                            width: size.width,
+                            height: size.height,
+                            x: pos.x,
+                            y: pos.y,
+                        };
+                        if let Err(reason) = winstate::save(&data_root, &actual) {
+                            winstate::save_error(&data_root, &reason);
+                        }
+                    }
+                }
+
+                // 之后窗口一被移动/缩放就把新状态记下来。
+                //
+                // **为什么不在退出时记**
+                // ------------------
+                // 退出那一刻窗口已经被销毁了 —— `get_webview_window("main")`
+                // 返回 None，什么都拿不到（实测过）。
+                // 所以改成**跟着窗口事件实时记**：最后一次写下的就是最新的。
+                //
+                // 拖动窗口时 Moved 会连着触发几十次 —— 写的是几百字节的小文件，
+                // 但还是限一下流：800ms 之内不重复写。
+                let win = window.clone();
+                let root = data_root.clone();
+                let last_write = Mutex::new(Instant::now() - Duration::from_secs(5));
+                window.on_window_event(move |event| {
+                    let moved_or_resized = matches!(
+                        event,
+                        tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)
+                    );
+                    if !moved_or_resized {
+                        return;
+                    }
+                    if let Ok(mut last) = last_write.lock() {
+                        if last.elapsed() < Duration::from_millis(800) {
+                            return;
+                        }
+                        *last = Instant::now();
+                    }
+                    if let (Ok(size), Ok(pos)) = (win.outer_size(), win.outer_position()) {
+                        let st = winstate::WindowState {
+                            width: size.width,
+                            height: size.height,
+                            x: pos.x,
+                            y: pos.y,
+                        };
+                        if let Err(reason) = winstate::save(&root, &st) {
+                            winstate::save_error(&root, &reason);
+                        }
+                    }
+                });
+            }
+
             // 内核的拉起结果：拉不起来就把原因记下来，给启动页显示。
             // 以前这里是 `.ok()` —— 失败被吞成 None，用户只能看到
             // 「内核启动超时」，完全不知道真实原因（0xc0000142？找不到解释器？）。
@@ -293,6 +382,27 @@ fn main() {
         .expect("Tauri 启动失败")
         .run(|app_handle, event| {
             if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
+                // 退出前把窗口的大小和位置记下来 —— 下次按这个开。
+                // 放在 Exit 分支里（而不是 CloseRequested）：那时窗口还在，
+                // 拿得到 outer_size / outer_position。
+                //
+                // Tauri v2 里这两个都返回 Result —— 拿不到就跳过，
+                // 存窗口状态不是关键路径，失败不该影响退出。
+                let root = paths::data_root();
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    if let (Ok(size), Ok(pos)) = (window.outer_size(), window.outer_position())
+                    {
+                        let st = winstate::WindowState {
+                            width: size.width,
+                            height: size.height,
+                            x: pos.x,
+                            y: pos.y,
+                        };
+                        if let Err(reason) = winstate::save(&root, &st) {
+                            winstate::save_error(&root, &reason);
+                        }
+                    }
+                }
                 if let Some(backend) = app_handle.try_state::<Backend>() {
                     if let Ok(mut guard) = backend.0.lock() {
                         if let Some(mut child) = guard.take() {
