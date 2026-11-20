@@ -43,3 +43,6 @@ generated-images/
 apps/web/dist/
 apps/web/node_modules/
 apps/web/tsconfig.tsbuildinfo
+
+# 新前端在桌面端的托管副本（构建产物，由 apps/desktop/scripts/build.py 生成）
+core/web/newui/

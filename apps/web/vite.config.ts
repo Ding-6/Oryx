@@ -12,9 +12,9 @@ import path from 'node:path'
 // 但**代理更省事**：同源就没有 cookie / Origin / 预检那一堆麻烦，
 // 也不用在 dev 时额外处理令牌。
 //
-// 生产构建产物由 FastAPI 直接托管（core/oryx/server.py 的 /web 路由），
+// 生产构建产物由内核托管在 `/web/newui/`（core/oryx/server.py 的 /newui 路由），
 // 不经过 Vite。
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },
@@ -28,8 +28,17 @@ export default defineConfig({
       },
     },
   },
+  // 构建产物的 base。
+  //
+  // 生产产物被内核托管在 `/web/newui/`，所以资源路径要带上这一段前缀；
+  // 开发时用 `/`（Vite dev server 自己会处理）。
+  //
+  // **不能用 `import.meta.env.PROD`** —— 那是给**应用源码**用的，
+  // 在配置文件里是 undefined（`Cannot read properties of undefined`）。
+  // 配置里要判断「是不是在构建」，用 `command`。
+  base: command === 'build' ? '/web/newui/' : '/',
   build: {
     outDir: 'dist',
     sourcemap: true,
   },
-})
+}))

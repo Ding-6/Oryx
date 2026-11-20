@@ -111,7 +111,12 @@ REQUEST_HEADER_VALUE = "1"
 DISABLE_REQUEST_VALIDATION = os.environ.get("ORYX_DISABLE_REQUEST_VALIDATION") == "1"
 
 # 这些路径不校验来源：静态资源与探活没有副作用。
-_PUBLIC_PATHS = ("/", "/api/ping", "/favicon.ico")
+#
+# `/newui` 也在里面 —— 它和 `/` 一样，**自己**会下发 HttpOnly cookie，
+# 所以「访问它」就是「拿到凭据」的那一步。
+# 不放行的话会死锁：中间件先挡掉请求，路由根本没机会下发 cookie，
+# 用户打开新界面只会看到一个 401。
+_PUBLIC_PATHS = ("/", "/newui", "/api/ping", "/favicon.ico")
 # 只读方法不需要来源标记（EventSource 之类的被动请求带不了自定义头）。
 _SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 
@@ -362,6 +367,38 @@ async def index() -> Any:
     response = HTMLResponse(html)
     # HttpOnly：JS 读不到 document.cookie
     # SameSite=Strict：别的站点发起的请求**不带**这个 cookie
+    response.set_cookie(
+        COOKIE_NAME,
+        API_TOKEN,
+        httponly=True,
+        samesite="strict",
+        path="/",
+    )
+    return response
+
+
+@app.get("/newui")
+async def new_ui() -> Any:
+    """新界面（React 19 + TS + Tailwind v4）的入口。
+
+    与 `/` 的关系：两者**并存** —— `/` 是老前端（原生 ES Module，已上线），
+    这个是新前端（正在逐域替换老前端）。替换完再撤老的。
+
+    为什么单独一条路由而不是直接把新前端放根上：
+    老前端还在跑着，用户现在用的就是它 —— 直接换掉等于把在用的东西砸了。
+
+    **为什么要在这里下发 cookie**
+    ------------------------------
+    新前端的 API 调用要带 HttpOnly cookie（令牌不在 JS 里）。
+    cookie 由服务端在响应里下发，所以**打开这个地址本身**就要把 cookie 带上，
+    否则页面能渲染、但每个 API 都 401（前端会显示「连不上内核服务」）。
+
+    静态资源在 `/web/newui/`（构建时 base 就是这么定的）。
+    """
+    index = WEB_DIR / "newui" / "index.html"
+    if not index.is_file():
+        raise HTTPException(404, "新界面还没构建 —— 先在 apps/web 跑 npm run build")
+    response = HTMLResponse(index.read_text("utf-8"))
     response.set_cookie(
         COOKIE_NAME,
         API_TOKEN,

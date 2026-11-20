@@ -422,11 +422,17 @@ class Response(BaseModel, Generic[T]):
 
 | 方法 | 路径 | 入参 | 出参 | 错误 | 前端用 |
 |---|---|---|---|---|---|
-| GET | `/` | — | **HTML** + `Set-Cookie: oryx_token=…`（HttpOnly / SameSite=strict / Path=/） | 500 | 是（浏览器入口） |
+| GET | `/` | — | **HTML**（老前端）+ `Set-Cookie: oryx_token=…`（HttpOnly / SameSite=strict / Path=/） | 500 | 是（浏览器入口） |
+| GET | `/newui` | — | **HTML**（新前端 React 19）+ 同样的 `Set-Cookie` | 404（新界面没构建）／500 | 是（新界面入口） |
 | GET | `/web/{path:path}` | path | **静态资源**（`no-store` + `nosniff`） | 400／403／404／415／413／500 | 是 |
 | GET | `/web/ui-extensions/{path:path}` | path | **静态资源** | 同上 | 是（间接：URL 由 `/api/ui/modules` 下发） |
 | GET | `/api/ping` | — | `{"ok": true}` | — | **否**（桌面壳 `apps/desktop/dist/index.html` 在用） |
 | GET | `/api/events` | q: `since: int=-1` | **SSE**：`data: {json}\n\n` | 401／403 | 是 |
+
+**新界面（`/newui`）**
+- 与 `/` **并存**：`/` 是老前端（原生 ES Module，已上线），`/newui` 是新前端（React 19 + TS + Tailwind v4），正在逐域替换老前端。
+- 静态资源在 `/web/newui/`（构建时 `base` 就是这么定的，见 `apps/web/vite.config.ts`）。
+- **在这里下发 cookie**：新前端的 API 调用要带 HttpOnly cookie（令牌不在 JS 里），cookie 由服务端在响应里下发 —— 打开这个地址本身就得把 cookie 带上，否则页面能渲染但每个 API 都 401。
 
 **SSE 细节**（`server.py:457`）：
 - 事件对象：`{seq:int, trace_id:str, type:str, ts:float, …业务字段}` —— `seq` 由 **server 侧** EventBus 重新分配

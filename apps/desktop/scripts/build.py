@@ -18,7 +18,11 @@
 ----
     python apps/desktop/scripts/build.py            # 完整流程
     python apps/desktop/scripts/build.py --skip-build  # 只打包（已有编译产物）
+    python apps/desktop/scripts/build.py --skip-newui  # 跳过新前端构建
     python apps/desktop/scripts/build.py --check      # 只检查前置条件
+
+第 0 步是**构建新前端**（React 19）并放进 core/web/newui/ ——
+产物不进 git，打包时必须现构建，否则装出来的程序里 /newui 会 404。
 """
 from __future__ import annotations
 
@@ -30,6 +34,7 @@ import sys
 from pathlib import Path
 
 DESKTOP = Path(__file__).resolve().parents[1]
+CORE = DESKTOP.parent.parent / "core"
 SRC_TAURI = DESKTOP / "src-tauri"
 RELEASE = SRC_TAURI / "target" / "release"
 BUNDLE = RELEASE / "bundle" / "nsis"
@@ -42,6 +47,50 @@ def _cargo() -> str | None:
         return found
     home = Path(os.environ.get("USERPROFILE", "")) / ".cargo" / "bin" / "cargo.exe"
     return str(home) if home.exists() else None
+
+
+NEW_WEB = DESKTOP.parent / "web"
+NEWUI_OUT = CORE / "web" / "newui"
+
+
+def build_new_ui(skip: bool = False) -> int:
+    """构建新前端，放进 ``core/web/newui/``。
+
+    为什么要有这一步
+    ----------------
+    新前端（React 19 + TS）构建后是一堆静态文件，
+    内核靠 ``core/oryx/server.py`` 的 ``/newui`` 路由托管它们
+    （静态资源在 ``/web/newui/``）。
+
+    **产物不进 git** —— 那是构建输出，应该由构建流程生成。
+    所以打包时必须现构建一次，否则装出来的程序里
+    ``/newui`` 会 404（路由会明确提示「新界面还没构建」）。
+
+    构建产物的 ``base`` 是 ``/web/newui/``（见 apps/web/vite.config.ts），
+    资源路径才对得上。
+    """
+    if skip:
+        print("\n=== 跳过新前端构建 ===")
+        return 0
+    npm = shutil.which("npm.cmd") or shutil.which("npm")
+    if not npm:
+        print("\n=== 跳过新前端构建：找不到 npm ===")
+        return 0
+    if not (NEW_WEB / "package.json").exists():
+        print("\n=== 跳过新前端构建：apps/web 不存在 ===")
+        return 0
+    rc = run([npm, "run", "build"], NEW_WEB, "构建新前端")
+    if rc != 0:
+        return rc
+    dist = NEW_WEB / "dist"
+    if not (dist / "index.html").exists():
+        print("新前端构建产物不对 —— dist/index.html 不存在")
+        return 1
+    if NEWUI_OUT.exists():
+        shutil.rmtree(NEWUI_OUT)
+    shutil.copytree(dist, NEWUI_OUT)
+    print(f"  新前端已放到 {NEWUI_OUT}")
+    return 0
 
 
 def check_prereqs() -> list[str]:
@@ -97,6 +146,8 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="只检查前置条件")
     ap.add_argument("--skip-build", action="store_true",
                     help="跳过 cargo build（用已有编译产物）")
+    ap.add_argument("--skip-newui", action="store_true",
+                    help="跳过新前端构建（core/web/newui 已就位时）")
     args = ap.parse_args()
 
     missing = check_prereqs()
@@ -112,6 +163,11 @@ def main() -> int:
 
     if args.check:
         return 0
+
+    # 0) 构建新前端 —— 产物不进 git，得现构建
+    rc = build_new_ui(skip=args.skip_newui)
+    if rc != 0:
+        return rc
 
     # 1) 同步 —— 最容易漏、又最致命的一步
     rc = run([sys.executable, str(DESKTOP / "scripts" / "sync_core.py")],
