@@ -58,7 +58,12 @@ def _test_tmp_root() -> Path:
         root = Path(override)
         root.mkdir(parents=True, exist_ok=True)
         return root
-    for cand in (Path("D:/OryxData/tmp"),):
+    # **不能放在 D://OryxData 里面** ——
+    # 那是用户真实数据根（config.json / oryx.db / index.db 都在那儿）。
+    # tests/test_paths.py 有一条护栏断言「测试路径里不能出现 OryxData」，
+    # 就是为了防止测试误伤用户数据。
+    # 所以测试用**独立**的根目录，同样放 D 盘，但跟数据根不沾边。
+    for cand in (Path("D:/OryxTestTmp"),):
         try:
             cand.mkdir(parents=True, exist_ok=True)
             return cand
