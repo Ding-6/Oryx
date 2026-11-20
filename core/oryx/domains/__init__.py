@@ -35,6 +35,7 @@ from . import (
     skill,
     system,
     team,
+    toolpack,
     tools,
     ui,
     workflow,
@@ -55,6 +56,7 @@ DOMAINS = (
     (ui, "界面扩展与核心样式子集"),
     (extension, "扩展：安装、启停、回收区"),
     (tools, "工具检索与语义索引状态"),
+    (toolpack, "自定义工具包"),
     (mcp, "MCP 服务器清单与启停"),
     (file, "文件产物、工作区、项目文档"),
     (persona, "人设与子 Agent 的增删改查"),
@@ -87,6 +89,7 @@ def register_all(app, *, store, config, agent, bus, api_token: str = "") -> None
     ui.register(app, config, agent)
     extension.register(app, agent)
     tools.register(app, agent)
+    toolpack.register(app, config)
     mcp.register(app, agent)
     file.register(app, config, agent)
     persona.register(app, config, agent)

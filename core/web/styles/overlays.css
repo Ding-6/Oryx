@@ -9,7 +9,9 @@
     flex:0 0 var(--team-aside-w, 268px);
     display:flex; flex-direction:column; min-height:0;
     border-right:1px solid var(--line);
-    padding:0 4px 0 0;
+    /* 左边留出 20px —— 「我的团队」原来紧贴窗口边（padding-left 是 0），
+       跟别的页面「文字不贴边」的规矩不一致。 */
+    padding:0 8px 0 20px;
   }
   .teamaside .th {
     position:sticky; top:0; z-index:6;
@@ -20,6 +22,11 @@
   }
   .teamaside .alist {
     flex:1 1 auto; min-height:0; overflow-y:auto;
+    /* 横向别滚动 —— .bitem::before 的 hover 底色往外扩了 6px，
+       列表因此多出 6px 的横向溢出，用户会看到一条左右滚动条。
+       溢出的那 6px 落在左栏自己的内边距里（左边 20px / 右边 8px），
+       裁掉不影响观感。 */
+    overflow-x:hidden;
     display:flex; flex-direction:column; gap:4px;
     padding-bottom:12px;
   }

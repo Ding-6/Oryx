@@ -81,17 +81,6 @@ export function fitTopbar() {
     - (parseFloat(barCs.paddingRight) || 0);
   if (!avail) return;
 
-  // 视图切换 tab 占着**固定**的位置 —— 从可用宽度里扣掉。
-  //
-  // 以前它们被整个排除在测量之外，于是判定「放得下」，
-  // 实际却把它们占的宽度漏算了 —— 顶栏溢出，模型胶囊被切掉一半。
-  // 排除在**需求**之外是对的（它们不参与降级判定），
-  // 但排除在**可用宽度**之外就是漏算。
-  const tabs = $('.topbar .viewtabs');
-  if (tabs && tabs.offsetParent !== null) {
-    avail -= tabs.getBoundingClientRect().width;
-  }
-
   // 量「真正常驻」的控件 —— 隐藏的（display:none）、占位符不算。
   //
   // **副标题（.sub，如「云端模型」）不参与测量** —— 它是**信息**不是控件，
@@ -104,10 +93,7 @@ export function fitTopbar() {
   const items = $$('.topbar > *').filter(el =>
     el.offsetParent !== null
     && el.getBoundingClientRect().width > 0
-    && !el.classList.contains('sub')
-    // 视图切换 tab 是**固定的导航**，不是对话参数 ——
-    // 不该参与「对话参数挤不挤得下」的判定。
-    && !el.classList.contains('viewtabs'));
+    && !el.classList.contains('sub'));
   if (!items.length) { bar.dataset.fit = ''; return; }
   const gap = parseFloat(getComputedStyle(bar).columnGap || '8') || 8;
   // 每个控件的**最小需求宽度**。

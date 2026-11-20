@@ -347,6 +347,43 @@ class Response(BaseModel, Generic[T]):
 | GET | `/api/tools/index` | — | `ready` `count` `dim` `cache` `cached` `error` `model_available` | 409/404/400 | **否** |
 | POST | `/api/tools/search` | body: `ToolSearchRequest{query: str="", limit: int=12}` | `query` `count` `tools[]` | 409/404/400；422（不传 body） | 是 |
 
+### 2.16b toolpack 域（`domains/toolpack.py`，prefix `/api/tool-packs`）
+
+**自定义工具包** —— 用户自己定义的「名字 + 描述 + 功能 + 由哪些工具组成」。
+
+| 方法 | 路径 | 入参 | 出参 | 错误 | 前端用 |
+|---|---|---|---|---|---|
+| GET | `/api/tool-packs` | — | `packs[]{id,name,description,function,tools[]}` | 409/404/400 | 是 |
+| POST | `/api/tool-packs` | body: `ToolPack{id,name,description,function,tools[]}` | `id` `name` `description` `function` `tools[]` | **400**「工具包要有名字」/「一个工具包至少要有一个工具」；**409**「已经有叫 X 的工具包了」；422 | 是 |
+| PUT | `/api/tool-packs/{pack_id}` | 同上 | 同上 | **404**「没有这个工具包」；400/409；422 | 是 |
+| DELETE | `/api/tool-packs/{pack_id}` | — | `deleted` | **404**「没有这个工具包」 | 是 |
+| GET | `/api/tool-packs/{pack_id}/export` | — | 插件清单（`oryx.json` 形状） | **404** | 是 |
+| POST | `/api/tool-packs/import` | body: 插件清单（`oryx.json`） | 新建的工具包 | **400**「清单里没有名字」/「一个工具都没有」/「这是 kind=X 的插件，不是工具包」；409 | 是 |
+| GET | `/api/tool-packs/{pack_id}/export` | — | 插件清单（`oryx.json` 形状） | **404** | 是 |
+| POST | `/api/tool-packs/import` | body: 插件清单（`oryx.json`） | 新建的工具包 | **400**「清单里没有名字」/「一个工具都没有」/「这是 kind=X 的插件，不是工具包」；409 | 是 |
+
+**要点**
+- 存在配置里（`config.data["tool_packs"]`），跟着应用数据走。
+  不落成磁盘插件包：那些是**带实现**的扩展（要写代码），
+  这里的工具包只是**对现有工具的分组与说明**。
+- `id` 只允许小写字母、数字、下划线、短横线（会进 URL，也当导出文件名用）。
+  留空时从名字生成；**全中文的名字用名字的哈希兜底** ——
+  否则每个中文名都退化成同一个 `pack`，第二个就撞 id。
+- `description` 与 `function` 是给**模型**看的（据此判断该不该用这套工具），
+  不是装饰 —— 这两个字段才是这个功能的核心。
+- **导出/导入用插件清单格式**（`oryx.json`，与扩展系统同一套）：
+  `apiVersion` / `kind: "tool"` / `id` / `version` / `displayName` /
+  `description` / `function` / `tools[]`。
+  跟 DeepSeek Harness 那一套对齐 —— 工具包不只是配置里的一条记录，
+  而是一个**能分享、能装到别的机器上的插件包**：
+  存成 `plugins/<包名>/oryx.json` 就能被注册表发现。
+- **导出/导入用插件清单格式**（`oryx.json`，与扩展系统同一套）：
+  `apiVersion` / `kind: "tool"` / `id` / `version` / `displayName` /
+  `description` / `function` / `tools[]`。
+  跟 DeepSeek Harness 那一套对齐 —— 工具包不只是配置里的一条记录，
+  而是一个**能分享、能装到别的机器上的插件包**：
+  存成 `plugins/<包名>/oryx.json` 就能被注册表发现。
+
 ### 2.17 mcp 域（`domains/mcp.py`，prefix `/api/mcp`）
 
 | 方法 | 路径 | 入参 | 出参 | 错误 | 前端用 |

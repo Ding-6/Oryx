@@ -202,6 +202,10 @@
   }
 
   * { box-sizing:border-box; }
+  /* 长串（URL、路径、报错栈、无空格的标识符）必须能断行 ——
+     否则它会把容器撑宽，页面就出现一条左右滚动条。
+     overflow-wrap:anywhere 只在必要时断词，不会影响正常的中文排版。 */
+  body { overflow-wrap:anywhere; }
   html,body { height:100%; margin:0; }
   /* 键盘焦点环：统一走 :focus-visible，鼠标点击不冒出来。
      输入框另有 .inp:focus 的边框+光晕，这里只兜底非输入控件。 */

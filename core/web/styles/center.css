@@ -41,8 +41,14 @@
   }
 
   .topbar {
+    /* 顶栏要**在自己的层里**，且在页面内容之上 ——
+       它下面的下拉弹层要能盖住欢迎页、对话区那些内容。
+       以前顶栏没有定位也没有 z-index，弹层只是「碰巧」没被压住。 */
+    position:relative; z-index:20;
     display:flex; align-items:center; gap:7px;
-    padding:10px 10px;
+    /* 顶栏左侧现在是**页面标题**（导航合并到左栏之后，顶栏左边不再有 tab）——
+       内边距太小的话标题就贴着窗口边，跟左栏那条 14px 的节奏也对不上。 */
+    padding:10px 16px;
     border-bottom:1px solid var(--line);
     background:var(--bg-2);
     flex-wrap:nowrap;
@@ -665,11 +671,22 @@
   .cbox:focus-within { border-color:var(--accent-line); box-shadow:0 10px 34px -12px rgba(99,102,241,.28); }
 
   /* 场景预设 tab —— 设计稿输入框顶部那一行 */
-  .scenes {
-    display:flex; align-items:center; gap:4px;
-    padding:12px 0 10px;
-    border-bottom:1px solid var(--line);
-    margin-bottom:2px;
+  /* 输入框顶部那行场景预设（胶囊组）。
+     **必须用 ID 选择器** —— `.scenes` 这个类名两处在用：
+     这行（#sceneBar）和工作台页的场景选择（panels.css 里那套）。
+     panels.css 加载在**后面**，同特异性的 `.scenes` 会把 center.css 的覆盖掉 ——
+     输入框这行因此拿到的是工作台那套容器样式，自己的 padding 根本不生效
+     （实测：选中的胶囊距卡片上边缘只有 5px，怎么调都不动）。
+     ID 的特异性更大，才改得动。 */
+  #sceneBar {
+    display:inline-flex; align-items:center;
+    border:1px solid var(--line);
+    border-radius:999px;
+    background:var(--bg-2);
+    padding:3px; gap:2px;
+    /* 往下挪一点 —— 别贴着输入框卡片的上边缘，
+       像是被卡片「切掉」了半截。留出呼吸的空间它才像是卡片里的一行。 */
+    margin:14px 0 18px;
   }
   .scenes .scene {
     border:0; background:transparent; cursor:pointer;

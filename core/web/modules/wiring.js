@@ -80,27 +80,6 @@ $('#themeBtn').addEventListener('click', async () => {
   document.addEventListener('click', () => setOpen(false));
 }
 
-// 顶栏的视图快捷切换
-$$('#viewTabs .vtab').forEach(b => {
-  b.addEventListener('click', () => {
-    const v = b.dataset.vt;
-    $$('#viewTabs .vtab').forEach(x => {
-      const on = x === b;
-      x.classList.toggle('on', on);
-      x.setAttribute('aria-selected', on ? 'true' : 'false');
-    });
-    if (v === 'chat') setView('chat');
-    else if (v === 'workflows') setView('workflows');
-    else if (v === 'market') setView('market');
-    else if (v === 'kb') {
-      const kb = document.querySelector('.navitem.localhead');
-      if (kb) kb.click();
-      const item = document.querySelector('#localSub .subitem[data-lv="kb"]');
-      if (item) item.click();
-    } else if (v === 'plugins') setView('market');
-  });
-});
-
 // ── 右栏 ──
 // 视图切换：助手（快捷功能 + 最近对话）/ 执行（过程面板）
 $$('#side .stview-tab').forEach(b => {

@@ -45,24 +45,6 @@ export function setView(v) {
   });
   // 子项跟着高亮：进入知识库时「知识库」也点亮
   $$('#localSub .subitem').forEach(b => b.classList.toggle('on', v === 'local' && b.dataset.lv === S.localView));
-  // 顶栏的视图 tab 跟着当前页面走。
-  //
-  // 以前**只有点顶栏 tab 才会点亮它** —— 从左栏切页面时顶栏纹丝不动，
-  // 于是顶栏还亮着「对话」，人其实已经在工作流页上了，分不清自己在哪。
-  //
-  // 映射不是一对一的：
-  //   知识库 → 左栏「本地资料」下的知识库子项（view 是 local）
-  //   插件   → 左栏「技能广场」（view 是 market）
-  // 键是 tab 上的 data-vt，值是它对应的 view。
-  const VT_VIEW = { chat: 'chat', workflows: 'workflows', kb: 'local', plugins: 'market' };
-  $$('#viewTabs .vtab').forEach(x => {
-    const target = VT_VIEW[x.dataset.vt];
-    const on = x.dataset.vt === 'kb'
-      ? (v === 'local' && S.localView === 'kb')
-      : (v === target);
-    x.classList.toggle('on', on);
-    x.setAttribute('aria-selected', String(on));
-  });
   const chat = v === 'chat';
   $('#center').style.display = chat ? 'flex' : 'none';
   $('#side').style.display = chat ? 'flex' : 'none';
@@ -323,6 +305,41 @@ export async function applyScene(name) {
   }
 }
 
+/** 改称呼的弹窗。
+ *
+ * 以前用的是 `window.prompt()` —— 浏览器原生弹窗：
+ * 白底黑字、系统灰按钮、宽度固定、还把半个界面盖住，
+ * 跟应用里其它弹层完全不是一路。
+ * 应用自己有统一的弹窗组件（modal.js，带焦点圈定与 Esc 关闭），用它。
+ */
+export function askUserName() {
+  const cur = userName();
+  openModal({
+    title: '改个称呼',
+    body: `<p class="lead" style="margin:0 0 12px">希望我怎么称呼你？</p>
+      <input class="inp" id="nmInput" value="${escAttr(cur)}" maxlength="24"
+             placeholder="比如：小明" aria-label="希望我怎么称呼你" />`,
+    foot: `<div class="spacer"></div>
+      <button class="btn" data-close type="button">取消</button>
+      <button class="btn primary" id="nmOk" type="button">确定</button>`,
+  });
+  const inp = $('#nmInput');
+  if (inp) {
+    inp.focus();
+    inp.select();
+    inp.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      $('#nmOk')?.click();
+    });
+  }
+  $('#nmOk')?.addEventListener('click', () => {
+    const v = (inp?.value || '').trim();
+    closeModal();
+    if (v && v !== cur) { setUserName(v); paintWelcome(); }
+  });
+}
+
 export function paintWelcome() {
   const box = $('#messages');
   if (!box || box.querySelector('.msg') || box.querySelector('.welcome')) return;
@@ -347,17 +364,13 @@ export function paintWelcome() {
           <span class="wact-go" aria-hidden="true">›</span>
         </button>`).join('')}
     </div>
-    <div class="wfoot">也可以把文件拖进窗口，或 <span class="kbd">Ctrl+V</span> 粘贴截图。破坏性动作会先出执行计划等你确认。</div>`;
+    `;
   box.appendChild(el);
 
   el.addEventListener('click', async (e) => {
     // 改称呼
     const rn = e.target.closest('#wRename');
-    if (rn) {
-      const v = window.prompt('希望我怎么称呼你？', userName());
-      if (v !== null) { setUserName(v); paintWelcome(); }
-      return;
-    }
+    if (rn) { askUserName(); return; }
 
     const b = e.target.closest('[data-wact]');
     if (!b) return;
@@ -2645,6 +2658,8 @@ export async function renderMarket() {
     // 一组工具（浏览器操作、系统设置、文件读写…）才是一个用户会用的东西，
     // 把 7 个 browser_* 拆成 7 张卡片，用户根本不知道该点哪个。
     // 每张卡片 = 一个工具集，点「用这套工具」把整组能力交给模型。
+    // 自定义工具包（用户自己定义的「名字 + 描述 + 功能 + 工具清单」）
+    const packs = await loadToolPacks();
     body.innerHTML = `<div class="row" style="margin-bottom:12px;align-items:center">
         <label for="mkGroup" style="font-size:12.5px;color:var(--muted)">工具集</label>
         <select class="inp" id="mkGroup" style="width:auto;min-width:170px">
@@ -2653,8 +2668,27 @@ export async function renderMarket() {
         </select>
         <div class="spacer"></div>
         <span style="font-size:12px;color:var(--muted)">${caps.groups.length} 套 · ${caps.total} 个工具</span>
-      </div><div class="grid ucgrid" id="mkToolGrid"></div>`;
+        <button class="btn" id="mkImportPack" type="button">导入插件包</button>
+        <button class="btn primary" id="mkAddPack" type="button">新建工具包</button>
+      </div>
+      ${packs.length ? `<div class="sect"><h2>我的工具包 · ${packs.length} 个</h2>
+        <div class="grid ucgrid" id="mkPackGrid">${packs.map(packCard).join('')}</div></div>` : ''}
+      <div class="sect"><h2>内置工具集 · ${caps.groups.length} 套</h2>
+      <div class="grid ucgrid" id="mkToolGrid"></div></div>`;
     const grid = $('#mkToolGrid');
+    $('#mkAddPack')?.addEventListener('click', () => editToolPack(null, caps.groups));
+    $('#mkImportPack')?.addEventListener('click', importToolPack);
+    if (packs.length) {
+      bindUCards($('#mkPackGrid'), (act, data) => {
+        const pack = packs.find(p => p.id === data);
+        if (!pack) return;
+        if (act === 'packedit') { editToolPack(pack, caps.groups); return; }
+        if (act === 'packexport') { exportToolPack(pack); return; }
+        if (act === 'packdel') { delToolPack(pack); return; }
+        if (act === 'packuse') { useCustomPack(pack); return; }
+        if (act === 'packdetail') { showToolPackDetail(pack); }
+      });
+    }
 
     // 一个工具集 = 一张卡片，卡片里列出这套工具都有什么
     const paintSets = groups => {
@@ -2688,6 +2722,14 @@ export async function renderMarket() {
           $('#setUseNow').addEventListener('click', () => { closeModal(); useSet(g.group); });
         };
       });
+    };
+
+    // 用自定义工具包：跟内置的一样，把工具名写进输入框
+    const useCustomPack = pack => {
+      const names = pack.tools.map(cnTool).join('、');
+      $('#input').value = `用「${pack.name}」这套工具（${names}）来处理：`;
+      setView('chat'); $('#input').focus();
+      toast('已带上「' + pack.name + '」的 ' + pack.tools.length + ' 个工具');
     };
 
     // 「用这套工具」：把整组工具的名字都写进输入框，模型自己挑
@@ -2777,6 +2819,186 @@ export async function viewSkill(name) {
     foot: `<button class="btn" data-close type="button">关闭</button><button class="btn primary" id="skEditNow" type="button">编辑</button>`,
   });
   $('#skEditNow').addEventListener('click', () => editSkill(d.name));
+}
+
+/* ── 自定义工具包 ──────────────────────────────────────────────
+   一个「工具包」= 名字 + 描述 + 功能说明 + 由哪些工具组成。
+   描述和功能是给**模型**看的 —— 它据此判断该不该用这套工具，
+   所以这两栏不是装饰，是这个功能的核心。
+   ─────────────────────────────────────────────────────────── */
+
+/** 取全部自定义工具包。 */
+async function loadToolPacks() {
+  try {
+    const r = await api('/api/tool-packs');
+    const j = await r.json();
+    const d = j && typeof j === 'object' && 'data' in j ? j.data : j;
+    return (d && d.packs) || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+/** 自定义工具包的卡片。 */
+function packCard(pack) {
+  return ucard({
+    icon: (pack.name || '?').slice(0, 1),
+    name: pack.name,
+    id: pack.id,
+    count: pack.tools.length + ' 个工具',
+    desc: pack.description || (pack.function ? pack.function.slice(0, 60) : '（没写说明）'),
+    chips: pack.tools.slice(0, 8).map(cnTool),
+    detail: 'pack:' + pack.id,
+    actions: [
+      { label: '编辑', act: 'packedit', data: pack.id },
+      { label: '导出插件包', act: 'packexport', data: pack.id },
+      { label: '删除', act: 'packdel', data: pack.id },
+    ],
+    primary: { label: '在对话中使用', act: 'packuse', data: pack.id },
+  });
+}
+
+/** 工具包详情：名字 / 描述 / 功能 / 工具清单。 */
+function showToolPackDetail(pack) {
+  ucDetail(pack.name, [
+    { label: '工具包 id', value: pack.id },
+    { label: '描述', value: pack.description || '（没写）' },
+    { label: '功能', value: pack.function || '（没写）' },
+    { label: '包含', html: `<div class="ucdetail" style="gap:8px">${pack.tools.map(t => `
+        <div class="urow" style="gap:8px">
+          <div class="uv"><b>${esc(cnTool(t))}</b>
+            <div style="font:11px/1.4 var(--font-mono);color:var(--muted)">${esc(t)}</div>
+          </div>
+        </div>`).join('')}</div>` },
+  ], `<button class="btn" data-close type="button">关闭</button>`);
+}
+
+/** 新建/编辑工具包。groups 是内置工具集，用来给勾选列表分组。 */
+function editToolPack(pack, groups) {
+  const all = [];
+  for (const g of (groups || [])) for (const t of (g.tools || [])) all.push({ name: t.name, group: g.group });
+  const picked = new Set((pack && pack.tools) || []);
+  openModal({
+    title: pack ? '编辑工具包' : '新建工具包',
+    wide: true,
+    body: `<div class="fld"><label for="tpName">名字</label>
+        <input class="inp" id="tpName" maxlength="40" value="${escAttr(pack ? pack.name : '')}" placeholder="比如：日常三件套"/></div>
+      <div class="fld"><label for="tpDesc">描述（一句话，模型据此判断要不要用）</label>
+        <input class="inp" id="tpDesc" maxlength="200" value="${escAttr(pack ? pack.description : '')}" placeholder="这套工具能解决什么问题"/></div>
+      <div class="fld"><label for="tpFunc">功能（具体能干什么、怎么用）</label>
+        <textarea class="inp" id="tpFunc" style="min-height:110px" placeholder="写清每个工具的用途、调用方式与边界">${esc(pack ? pack.function : '')}</textarea></div>
+      <div class="fld"><label>组成这个包的工具（已选 <span id="tpCount">${picked.size}</span> 个）</label>
+        <input class="inp" id="tpFilter" placeholder="过滤工具名…" aria-label="过滤工具"/>
+        <div class="tpbox" id="tpTools"></div></div>`,
+    foot: `<button class="btn" data-close type="button">取消</button><button class="btn primary" id="tpSave" type="button">保存</button>`,
+  });
+  const box = $('#tpTools');
+  const paintTools = (kw) => {
+    const q = (kw || '').toLowerCase();
+    const hit = all.filter(t => !q || t.name.toLowerCase().includes(q) || cnTool(t.name).includes(q));
+    if (!hit.length) { box.innerHTML = '<div class="empty">没有匹配的工具</div>'; return; }
+    box.innerHTML = hit.map(t => `<label class="tpitem"><input type="checkbox" data-tpt="${escAttr(t.name)}" ${picked.has(t.name) ? 'checked' : ''}/>
+        <span>${esc(cnTool(t.name))}</span><code>${esc(t.name)}</code></label>`).join('');
+    box.querySelectorAll('[data-tpt]').forEach(cb => cb.addEventListener('change', () => {
+      const n = cb.dataset.tpt;
+      if (cb.checked) picked.add(n); else picked.delete(n);
+      $('#tpCount').textContent = picked.size;
+    }));
+  };
+  paintTools('');
+  $('#tpFilter')?.addEventListener('input', e => paintTools(e.target.value));
+  $('#tpSave')?.addEventListener('click', async () => {
+    const payload = {
+      id: pack ? pack.id : '',
+      name: $('#tpName').value.trim(),
+      description: $('#tpDesc').value.trim(),
+      function: $('#tpFunc').value,
+      tools: [...picked],
+    };
+    if (!payload.name) { toast('工具包要有名字'); return; }
+    if (!payload.tools.length) { toast('至少选一个工具'); return; }
+    const r = pack
+      ? await api(`/api/tool-packs/${encodeURIComponent(pack.id)}`, { method: 'PUT', body: JSON.stringify(payload) })
+      : await api('/api/tool-packs', { method: 'POST', body: JSON.stringify(payload) });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      toast('失败：' + (e.detail || e.message || r.status));
+      return;
+    }
+    closeModal();
+    toast(pack ? '已保存' : '已创建');
+    renderMarket();
+  });
+}
+
+/** 导出工具包 → 插件清单（oryx.json 的形状）。
+ *
+ * 跟 DeepSeek Harness 那一套对齐：工具包不只是配置里的一条记录，
+ * 而是一个**能分享、能装到别的机器上的插件包**。
+ * 清单格式跟扩展系统完全一致 —— 一个包既能在这儿用，
+ * 也能直接丢进 plugins/ 目录被注册表发现。
+ */
+async function exportToolPack(pack) {
+  const r = await api(`/api/tool-packs/${encodeURIComponent(pack.id)}/export`);
+  if (!r.ok) { toast('导出失败'); return; }
+  const j = await r.json();
+  const manifest = (j && 'data' in j) ? j.data : j;
+  const text = JSON.stringify(manifest, null, 2);
+  openModal({
+    title: '导出插件包 · ' + manifest.displayName,
+    wide: true,
+    body: `<p class="lead" style="margin:0 0 10px">把下面这段存成 <code>oryx.json</code>，
+        丢进 <code>plugins/&lt;包名&gt;/</code> 目录就能被注册表发现；也可以在另一台机器上用「导入插件包」装上。</p>
+      <textarea class="inp" id="pkManifest" style="min-height:300px;font-family:var(--font-mono);font-size:12px">${esc(text)}</textarea>`,
+    foot: `<button class="btn" data-close type="button">关闭</button>
+      <button class="btn primary" id="pkCopy" type="button">复制到剪贴板</button>`,
+  });
+  $('#pkCopy')?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('已复制');
+    } catch (e) {
+      toast('复制失败，手动选中复制吧');
+    }
+  });
+}
+
+/** 导入插件包：贴一份 oryx.json 清单进来。 */
+function importToolPack() {
+  openModal({
+    title: '导入插件包',
+    wide: true,
+    body: `<p class="lead" style="margin:0 0 10px">贴一份插件清单（<code>oryx.json</code>，<code>kind</code> 为 <code>tool</code>）。</p>
+      <textarea class="inp" id="pkImport" style="min-height:260px;font-family:var(--font-mono);font-size:12px"
+        placeholder='{"apiVersion":"oryx/v1","kind":"tool","id":"my-pack","displayName":"我的工具包","description":"…","tools":[{"name":"fs_read"}]}'></textarea>`,
+    foot: `<button class="btn" data-close type="button">取消</button>
+      <button class="btn primary" id="pkImportOk" type="button">导入</button>`,
+  });
+  $('#pkImportOk')?.addEventListener('click', async () => {
+    const raw = ($('#pkImport')?.value || '').trim();
+    if (!raw) { toast('先贴一份清单'); return; }
+    let manifest;
+    try { manifest = JSON.parse(raw); }
+    catch (e) { toast('不是合法的 JSON'); return; }
+    const r = await api('/api/tool-packs/import', { method: 'POST', body: JSON.stringify(manifest) });
+    if (!r.ok) {
+      const e2 = await r.json().catch(() => ({}));
+      toast('导入失败：' + (e2.detail || e2.message || r.status));
+      return;
+    }
+    closeModal();
+    toast('已导入');
+    renderMarket();
+  });
+}
+
+/** 删工具包。 */
+async function delToolPack(pack) {
+  if (!confirm(`删除工具包「${pack.name}」？`)) return;
+  const r = await api(`/api/tool-packs/${encodeURIComponent(pack.id)}`, { method: 'DELETE' });
+  if (!r.ok) { toast('删除失败'); return; }
+  toast('已删除');
+  renderMarket();
 }
 
 function editSkill(name) {

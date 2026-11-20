@@ -292,7 +292,7 @@ def test_workflow_delete_missing_raises_404():
 EXPECTED_DOMAINS = [
     "session", "model_config", "skill", "schedule", "checkpoint", "workflow",
     "appearance", "feature", "memory", "remote", "ui", "extension",
-    "tools", "mcp", "file", "persona", "team", "index",
+    "tools", "toolpack", "mcp", "file", "persona", "team", "index",
     "preference", "chat", "app", "system",
     "overview",
 ]
@@ -302,7 +302,7 @@ EXPECTED_PREFIXES = {
     "/api/appearance", "/api/features", "/api/memory", "/api/remote",
     "/api/ui", "/api/extensions", "/api/ui-extensions",
     "/api/tools", "/api/mcp", "/api/files", "/api/workspace", "/api/doc",
-    "/api/teams", "/api/overview",
+    "/api/teams", "/api/overview", "/api/tool-packs",
     # persona 域管**多个**前缀（/api/persona、/api/expert、/api/experts、
     # /api/agents），index 域也是（/api/index、/api/drives、/api/images）——
     # 所以它们的 router 用 `/api` 前缀 + tag 区分。

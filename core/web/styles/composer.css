@@ -309,10 +309,16 @@
     animation:rise var(--dur-fast) var(--ease) both;
   }
   .topmore-pop[hidden] { display:none; }
-  .topmore-pop .tmrow { display:flex; align-items:center; gap:10px; }
+  /* 每一行（标签 + 控件）**要能换行**。
+     以前不换行：字体一大（用户的显示缩放不是 100%），
+     「交互模式」那行的分段控件就压到标签上，
+     两块叠在一起，看着像设置被覆盖了。
+     允许换行后，放不下就分两行，谁也不压谁。 */
+  .topmore-pop .tmrow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .topmore-pop .tmlabel {
     flex:0 0 52px; font-size:var(--fs-xs); color:var(--muted);
   }
   .topmore-pop select.btn { flex:1 1 auto; min-width:0; max-width:none; }
-  .topmore-pop .seg { flex:1 1 auto; }
+  .topmore-pop .seg { flex:1 1 120px; min-width:0; }
+  .topmore-pop .seg button { min-width:0; }
   .topmore-pop .seg button { flex:1 1 0; padding:4px 6px; font-size:var(--fs-xs); }

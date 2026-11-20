@@ -504,6 +504,26 @@
   }
 
   /* 设置分类导航 */
+  /* 自定义工具包：工具勾选列表。
+     工具有几十个，列表必须能滚，而且要能过滤 —— 否则找到一个工具要翻半天。 */
+  .tpbox {
+    max-height:260px; overflow-y:auto;
+    border:1px solid var(--line); border-radius:10px;
+    padding:6px; background:var(--bg);
+  }
+  .tpitem {
+    display:flex; align-items:center; gap:8px;
+    padding:5px 8px; border-radius:7px; cursor:pointer;
+    font-size:12.5px;
+  }
+  .tpitem:hover { background:var(--panel-2); }
+  .tpitem input { flex:0 0 auto; accent-color:var(--accent); }
+  .tpitem span { flex:1 1 auto; min-width:0; }
+  .tpitem code {
+    flex:0 0 auto; font:11px/1.4 var(--font-mono); color:var(--muted);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:45%;
+  }
+
   .setwrap { display:flex; gap:28px; max-width:1100px; margin:0 auto; padding:32px 28px 80px; }
   .setnav { width:200px; flex:0 0 200px; }
   .setnav .it {
