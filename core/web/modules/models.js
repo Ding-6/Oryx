@@ -875,9 +875,17 @@ export async function refreshState() {
     S.provider = s.provider || '';
     // 只改文字节点 —— modelChip 里有图标和下拉箭头，
     // 直接设 textContent 会把它们一起抹掉。
+    // 胶囊里只显示**模型名** —— 「provider · model」两个加起来太宽，
+    // 顶栏空间一紧就被截成「anthrop…」，等于什么都没显示。
+    // provider 挪到 tooltip（点开就能看到全部 provider）。
+    const label = s.model || s.provider || '未配置';
     const mt = $('#modelChipText');
-    if (mt) mt.textContent = `${s.provider || '未配置'} · ${s.model || '—'}`;
-    else $('#modelChip').textContent = `${s.provider || '未配置'} · ${s.model || '—'}`;
+    if (mt) mt.textContent = label;
+    else $('#modelChip').textContent = label;
+    const chip = $('#modelChip');
+    if (chip) chip.title = s.provider
+      ? `当前：${s.provider} · ${label}（点击切换模型服务）`
+      : '未配置模型服务（点击设置）';
     $('#modeSel').value = s.mode;
     // 副标题写当前跑的是本地还是云端 —— 不看 provider 名字猜
     $('#pageSub').textContent = s.provider ? (s.provider_is_local ? '本地模型' : '云端模型') : '';

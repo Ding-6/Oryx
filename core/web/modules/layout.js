@@ -76,10 +76,22 @@ export function fitTopbar() {
   if (!bar || !center) return;
   const barCs = getComputedStyle(bar);
   // 可用宽度要**扣掉 topbar 自己的 padding** —— 它占的是主区的宽度
-  const avail = center.getBoundingClientRect().width
+  let avail = center.getBoundingClientRect().width
     - (parseFloat(barCs.paddingLeft) || 0)
     - (parseFloat(barCs.paddingRight) || 0);
   if (!avail) return;
+
+  // 视图切换 tab 占着**固定**的位置 —— 从可用宽度里扣掉。
+  //
+  // 以前它们被整个排除在测量之外，于是判定「放得下」，
+  // 实际却把它们占的宽度漏算了 —— 顶栏溢出，模型胶囊被切掉一半。
+  // 排除在**需求**之外是对的（它们不参与降级判定），
+  // 但排除在**可用宽度**之外就是漏算。
+  const tabs = $('.topbar .viewtabs');
+  if (tabs && tabs.offsetParent !== null) {
+    avail -= tabs.getBoundingClientRect().width;
+  }
+
   // 量「真正常驻」的控件 —— 隐藏的（display:none）、占位符不算。
   //
   // **副标题（.sub，如「云端模型」）不参与测量** —— 它是**信息**不是控件，
@@ -98,20 +110,23 @@ export function fitTopbar() {
     && !el.classList.contains('viewtabs'));
   if (!items.length) { bar.dataset.fit = ''; return; }
   const gap = parseFloat(getComputedStyle(bar).columnGap || '8') || 8;
-  // **用 scrollWidth 而不是 rect.width** —— rect.width 是「收缩之后」的宽度，
-  // 拿它算就成了循环：被压窄 → 看起来放得下 → 不收紧 → 其实放不下。
-  // scrollWidth 是内容的自然宽度，才是「真需要多少地方」。
+  // 每个控件的**最小需求宽度**。
+  //
+  // 以前一律按「自然宽度」算（Math.max(rect, natural)）——
+  // 对**可缩**的控件（标题、模型胶囊）这是虚高的：它们本来就能缩，
+  // 按自然宽度要求就会「明明放得下也判定放不下」，控件被白白藏起来。
+  //
+  // 所以分两种：
+  //   · 能缩的（有 min-width 且小于自然宽度）→ 按 min-width 算
+  //   · 不能缩的（按钮、tab）→ 按自然宽度算
   const need = items.reduce((s, el) => {
-    const rect = el.getBoundingClientRect().width;
-    // **自然宽度要按 max-width 封顶** —— 对设了 max-width 的元素
-    // （比如模型名胶囊）scrollWidth 是「内容有多长」，
-    // 不是「它最多能占多宽」。按内容算会把需求算虚高，
-    // 于是明明放得下也判定放不下，控件全被藏起来。
     const cs = getComputedStyle(el);
     const maxW = parseFloat(cs.maxWidth) || 0;
+    const minW = parseFloat(cs.minWidth) || 0;
     let natural = el.scrollWidth || 0;
     if (maxW) natural = Math.min(natural, maxW);
-    return s + Math.max(rect, natural);
+    const want = (minW > 0 && minW < natural) ? minW : natural;
+    return s + want;
   }, 0) + gap * (items.length - 1);
   const ratio = need ? avail / need : 2;
   bar.dataset.fit = ratio < 0.62 ? 'mini' : ratio < 0.82 ? 'ultra' : ratio < 0.99 ? 'tight' : '';
@@ -120,7 +135,13 @@ export function fitTopbar() {
 /* 内容列宽度：正文列与输入框共用同一个宽度和同一个左边距，两边严格对齐。
    对齐 Marvis 的做法（ResizeObserver 量容器 → 写 CSS 变量）。
    上限 1004px —— 再宽正文行长就超过一行能舒服读完的长度了。 */
-const CHAT_COL_MAX = 1004;
+// 正文列的最大宽度。
+//
+// **1004 太宽了** —— 一行 1000 多个字符，眼睛从行首扫到行尾要来回找，
+// 读长回复很累。Codex / ChatGPT 那一类都是 760~880。
+// 880 是「够宽（代码块、表格放得下）+ 不难读」的平衡点，
+// 也跟 CSS 里 --chat-col 的默认值一致（以前两边对不上）。
+const CHAT_COL_MAX = 880;
 const CHAT_GUTTER_MIN = 12;
 const CHAT_GUTTER_MAX = 44;
 function fitChatCol() {

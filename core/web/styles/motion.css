@@ -66,9 +66,12 @@
   .topbar[data-fit="ultra"] #styleSel,
   .topbar[data-fit="mini"] #modeSel,
   .topbar[data-fit="mini"] #styleSel { display:none; }
-  .topbar[data-fit="ultra"] #expertSel,
-  .topbar[data-fit="ultra"] #modelChip,
-  .topbar[data-fit="mini"] #expertSel,
+  /* 窄窗时先藏**视图切换 tab**（它们跟左栏导航重复），留住模型胶囊。
+     模型胶囊是控件（用户要能点、能看出当前跑的是哪个模型），
+     顶栏那排 tab 是快捷方式 —— 左栏已经有一份了。
+     实在没地方了（mini）才轮到模型胶囊。 */
+  .topbar[data-fit="ultra"] .viewtabs,
+  .topbar[data-fit="mini"] .viewtabs { display:none; }
   .topbar[data-fit="mini"] #modelChip { display:none; }
   .topbar[data-fit="tight"] #pageTitle { min-width:44px; }
   .topbar[data-fit="ultra"] #pageTitle,

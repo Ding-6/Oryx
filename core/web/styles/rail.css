@@ -34,12 +34,26 @@
   /* 导航不滚、对话列表才滚。
      之前导航限高 45% 加自己的滚动条 —— 会话一多就把「对话」标题顶出视野，
      而且导航区那条滚动条跟对话区的长得一模一样，用户分不清该滚哪。
-     现在导航按内容占高（永远完整显示），只有会话列表是滚动容器。 */
-  .railnav { flex:0 0 auto; overflow:visible; }
+     现在导航按内容占高（永远完整显示），只有会话列表是滚动容器。
+
+     **左边距节奏**（实测后统一，别再各处随手写）
+     ------------------------------------------------
+     左栏所有内容块共用一条左边距线（14px = --rail-inset）：
+       · 搜索框、logo      → 14px（railhead 的 padding）
+       · 「新建对话」胶囊   → 14px（这里给 .railnav 加 padding）
+       · 章节标题「对话历史」→ 14px
+       · 分组标题「今天」   → 16px（#sessList 的 padding）
+       · 导航图标          → 26px（图标列，比框再缩一档，形成层级）
+       · 会话状态点        → 16px
+
+     之前「新建对话」和「对话历史」都是 0（紧贴窗口边），
+     跟搜索框差出一大截，看着像没对齐 —— 用户一眼就觉得不协调。 */
+  .railnav { flex:0 0 auto; overflow:visible; padding:0 14px; }
   /* 会话列表那组：占满剩余空间，自己滚 —— 左栏里唯一的滚动条 */
   .railgroup { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; border-top:1px solid var(--line); }
-  .railgroup .gt { flex:0 0 auto; }
-  .railgroup #sessList { flex:1 1 auto; min-height:0; overflow-y:auto; padding:0 6px 8px; }
+  /* 章节标题要和上面的框（搜索框、胶囊）对齐 —— 之前它是 0，贴着窗口边 */
+  .railgroup .gt { flex:0 0 auto; padding:8px 14px 6px; }
+  .railgroup #sessList { flex:1 1 auto; min-height:0; overflow-y:auto; padding:0 10px 8px; }
   .railgroup #sessList::-webkit-scrollbar { width:6px; }
   .railhead { padding:18px 14px 10px; }
   .logo {
@@ -84,7 +98,8 @@
   .search input::placeholder { color:var(--muted); }
   .search svg { width:14px; height:14px; stroke:var(--muted); fill:none; stroke-width:1.8; flex:0 0 14px; }
 
-  .nav { padding:10px 10px 4px; }
+  /* 横向内边距交给 .railnav（统一 14px）—— 这里再加一层就缩两档了 */
+  .nav { padding:10px 0 4px; }
   /* 本地资料是分组头，缩进对齐左侧圆点 */
   .nav .navgroup { margin:0; }
   .nav .navgroup > .navitem { margin-top:6px; }
@@ -128,6 +143,10 @@
     color:var(--on-brand);
     font-weight:600;
     box-shadow:0 6px 16px -6px color-mix(in srgb, var(--accent) 70%, transparent);
+    /* 图标+文字**整组居中**。
+       之前没写 justify-content，flex 默认 flex-start ——
+       图标和文字一起贴在胶囊左边，右边空一大块，看着没对齐。 */
+    justify-content:center;
   }
   .navitem.newchat:hover { filter:brightness(1.06); color:var(--on-brand); }
   .navitem.newchat .ic { stroke:currentColor; stroke-width:1.9; }
@@ -277,9 +296,10 @@
   .iconbtn svg { width:15px; height:15px; stroke:var(--ink-2); fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
 
   /* 「对话历史」标题行：左边标题，右边 ⋯ 按钮 */
-  /* 标题行要跟下面的会话列表**左边对齐** ——
-     列表有 6px 内边距，标题没有的话「对话历史」会顶到边上。 */
-  .railgroup .gt { display:flex; align-items:center; gap:8px; padding:10px 6px 6px; }
+  /* **padding 不在这里设** —— 上面第 55 行那条已经定了统一节奏（14px）。
+     两条规则同特异性、这条在后，会把上面那条覆盖掉：
+     实测「对话历史」一直贴在 0（紧贴窗口边），跟搜索框差一大截。 */
+  .railgroup .gt { display:flex; align-items:center; gap:8px; }
   .railgroup .gtmore {
     margin-left:auto; border:0; background:transparent; cursor:pointer;
     color:var(--muted); padding:3px 5px; border-radius:6px;
@@ -290,13 +310,15 @@
   .railgroup .tw { margin-left:0; }
 
   /* 「查看更多」—— 设计稿里它在会话列表下面一行，
-     不是个占满整栏的按钮。 */
+     不是个占满整栏的按钮。
+     **左边距跟上面的标题、列表对齐**（14px）——
+     之前它是 8px，贴着窗口边，跟同组的元素错开一截。 */
   .seeall {
     flex:0 0 auto;
     display:flex; align-items:center; gap:4px;
     border:0; background:transparent; cursor:pointer;
     color:var(--muted); font-size:var(--fs-xs);
-    padding:8px 8px 10px; text-align:left;
+    padding:8px 14px 10px; text-align:left;
   }
   .seeall:hover { color:var(--accent); }
   .seeall span { font-size:14px; line-height:1; }

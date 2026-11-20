@@ -245,20 +245,26 @@
        之前是个光秃秃的文字胶囊，点之前不知道能不能点。 */
     position:relative;
     padding-left:28px;
-    max-width:104px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-    /* 顶栏里**唯一可收缩**的元素 —— 空间不够时它先让位。
-       「专业」「效率」这类**功能选择器**必须留着，
-       不然用户根本没法切回答风格和计算模式。 */
+    max-width:172px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    /* 顶栏里唯一可收缩的元素 —— 但它排在标题后面，
+       空间不够时**先缩标题**（标题是标签，控件不能丢）。
+       宽度给到 152px：「anthropic · claude-sonnet-5-5」这种
+       provider+model 的组合要能看出个大概，
+       104px 时只能显示「anthrop…」，等于没显示。 */
     /* **flex-basis 显式给 112px** —— 不给的话 basis 取内容宽度
        （`anthropic · claude-sonnet-5-5` 有 215px），
        于是它先按 215 参与收缩计算，直接被压到 min-width。
        给了 basis 就按 112 起步，只在真的放不下时才收缩。 */
-    flex:0 1 104px;
+    flex:0 1 172px;
     /* 下限 68px —— 不给下限的话，空间一紧它会被压成 0 宽，
        模型名整个消失，用户就不知道当前跑的是哪个模型了。
        宁可只显示模型名的一半，也不能不显示。 */
     min-width:68px;
-    padding-left:26px; padding-right:7px;
+    /* 左侧留给地球图标（绝对定位在 left:8px，宽 13px）—— 24px 刚好。
+       右侧要给下拉箭头留 12px + 7px 内边距。
+       剩下的是模型名的宽度：172 - 24 - 7 - 12 = 129px，
+       「claude-sonnet-5-5」这种 17 个字符（112px）放得下。 */
+    padding-left:24px; padding-right:7px;
     display:flex; align-items:center; gap:0;
   }
   .modelpick:hover { border-color:var(--accent); color:var(--accent); }

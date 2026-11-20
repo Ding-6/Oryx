@@ -31,11 +31,10 @@
     white-space:nowrap;
     transition:color .15s, background .15s;
   }
-  .viewtabs .vtab svg {
-    width:14px; height:14px; flex:0 0 14px;
-    fill:none; stroke:currentColor; stroke-width:1.8;
-    stroke-linecap:round; stroke-linejoin:round;
-  }
+  /* 图标在顶栏里是**重复**的 —— 左栏那排导航已经有同样的图标了，
+     顶栏再来一遍既占地方（4 个图标 ≈ 85px）又让人以为是两组不同的东西。
+     文字保留，图标隐藏；窄窗时连文字也退掉（见下面的 media 查询）。 */
+  .viewtabs .vtab svg { display:none; }
   .viewtabs .vtab:hover { color:var(--ink); background:var(--panel-2); }
   .viewtabs .vtab.on {
     background:var(--accent-soft); color:var(--accent); font-weight:600;
@@ -48,7 +47,20 @@
     background:var(--bg-2);
     flex-wrap:nowrap;
   }
-  .topbar h1 { font-size:15px; margin:0; font-weight:700; letter-spacing:-.3px; white-space:nowrap; color:var(--ink); }
+  /* 标题是**标签**，模型胶囊是**控件** ——
+     空间不够时该先让标题让位（截断成省略号），
+     控件必须留着可点。
+     以前 h1 写死 nowrap 不可缩，挤到最后是模型名被压成「anthrop…」——
+     用户连当前跑的是哪个模型都看不出来。 */
+  .topbar h1 {
+    font-size:15px; margin:0; font-weight:700; letter-spacing:-.3px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    flex:0 1 auto;
+    /* 标题的下限 44px —— 顶栏的空间判定（fitTopbar）按 min-width 算需求，
+       没有下限的话它会被算成「需要整段标题的宽度」，
+       于是稍微一窄就判定放不下、控件被白白藏起来。 */
+    min-width:44px;
+  }
   /* 顶栏里的图标按钮（团队、对话设置…）
      —— 以前**根本没有 .topbar .tbtn 这条规则**，
      顶栏的按钮一直用的是浏览器默认外观（灰底方角），
@@ -153,11 +165,40 @@
 
   #scroll { flex:1; overflow-y:auto; }
   /* 横向留白统一由 --chat-gutter 给（见 fitChatCol）——
-     不叠 padding、不用 margin:auto，正文列和输入框才能严格同宽同位。 */
+     列宽算好之后**居中**放，两侧留白一样多。
+
+     之前是 margin-left（靠左放），右边空出一大块 ——
+     窗口越宽，右边那块空白越明显，视觉重心整个偏左。
+     Codex 那种「一条居中的文字列」看着稳，就是靠这个。 */
   .wrap {
     width:var(--chat-col);
-    margin-left:var(--chat-gutter);
+    margin:0 auto;
     padding:32px 0 18px;
+  }
+
+  /* 空会话时把欢迎块**垂直居中**。
+     之前它贴着顶，下面空一大块，输入框孤零零挂在最底下 ——
+     中间那片空白让人以为页面没加载完。
+     Codex 那种「一进来内容就在眼前」的感觉就来自这个居中。
+
+     用 :has() 判断「会话是空的」—— 不改 JS，
+     而且消息一到就自动回到顶对齐（正常对话不该居中）。 */
+  #scroll:has(.welcome) .wrap {
+    min-height:100%;
+    display:flex; flex-direction:column; justify-content:center;
+    padding-bottom:0;
+  }
+  /* 欢迎块要**撑满**正文列，不能按内容宽度收缩。
+     flex 容器里 `margin:0 auto` 会让子项按内容宽度收缩并居中 ——
+     那一来欢迎语就跟下面的输入框错开了半列，看着像两个页面。
+
+     注意：**光写 align-self:stretch 不够** —— 横向 auto 边距会**先于**
+     align-self 吃掉剩余空间，flex 规范就是这么定的。
+     所以必须把 auto 边距也去掉。 */
+  #scroll:has(.welcome) .wrap > .welcome {
+    align-self:stretch;
+    margin-left:0; margin-right:0;
+    width:100%;
   }
 
   /* ══════════ 欢迎页 ══════════
@@ -258,8 +299,19 @@
     text-align:center;
   }
 
-  /* 对话消息 */
-  .msg { display:flex; gap:12px; margin-bottom:26px; }
+  /* 对话消息
+     ────────────────────────────────────────────────────────────
+     形态对齐 Codex：**没有头像**，正文顶格像一份文档，
+     用户的提问收在右边的浅色气泡里。
+
+     为什么去掉头像
+     --------------
+     带头像时每条消息都变成「一条聊天记录」，正文被挤到右边一小块，
+     读长回复时要在一堆圆头像之间来回找行首。
+     去掉之后助手的消息就是**一列连续的正文**，
+     跟 Codex / Claude 那类「文档式」对话一个感觉。
+     左边距由 .wrap 的居中列统一给（--chat-col），消息自己不用再缩。 */
+  .msg { display:flex; gap:12px; margin-bottom:14px; }
   .msg .av {
     /* 24×24 —— 对齐 Marvis 的 .semi-ai-chat-dialogue-avatar */
     width:24px; height:24px; flex:0 0 24px;
@@ -269,22 +321,33 @@
     background:var(--user-av);
     color:var(--ink-2);
   }
+  /* 头像不显示了（元素留着，将来要恢复只要去掉这行） */
+  .msg .av { display:none; }
   .msg.bot .av { background:var(--bot-av); color:var(--bot-fg); font-size:10px; letter-spacing:.2px; }
   .msg .body { flex:1; min-width:0; }
   .bubble {
     white-space:pre-wrap; word-break:break-word;
-    font-size:15px; line-height:1.7;
+    font-size:15px; line-height:1.72;
     color:var(--ink);
   }
+  /* 用户气泡：更克制 —— 底色更浅、圆角更柔、内边距更紧。
+     之前 12px 16px 的内边距 + 16px 圆角，气泡显得很「鼓」，
+     跟旁边克制的正文不是一路。 */
   .msg.user .bubble {
     background:var(--user-bg);
     color:var(--user-fg);
-    padding:12px 16px;
-    border-radius:16px 16px 4px 16px;
+    padding:9px 14px;
+    border-radius:14px 14px 4px 14px;
     display:inline-block;
-    max-width:min(600px, 78%);
+    max-width:min(560px, 76%);
+    font-size:14.5px;
+    line-height:1.66;
   }
-  .msg.bot .bubble { padding:2px 0; }
+  .msg.bot .bubble { padding:0; }
+  /* 助手这一轮讲完了 → 留一段空白。
+     一问一答之间要能看出「轮次」的边界，
+     不然助手的长回复和用户下一句黏在一起，读起来没有停顿。 */
+  .msg.bot { margin-bottom:34px; }
 
   /* 用户消息在右、机器人在左（对齐 Marvis）。
      之前两边都左对齐、整列又居中，右边完全没有锚点 ——
@@ -585,10 +648,10 @@
   /* 输入区 */
   #composer { padding:10px 0 18px; }
   .cbox {
-    /* 与 .wrap 同宽同位（同一个 --chat-col / --chat-gutter）——
+    /* 与 .wrap 同宽同位（同一个 --chat-col，一起居中）——
        不然输入框和消息列对不齐，看着就像两个不同的界面 */
     width:var(--chat-col);
-    margin-left:var(--chat-gutter);
+    margin:0 auto;
     background:var(--card);
     border:1px solid var(--line);
     /* **大圆角卡片** —— 设计稿的输入框是一张独立的浮层，
