@@ -2693,6 +2693,7 @@ export async function renderMarket() {
       <button class="btn" id="mkImport" type="button">批量导入</button>
       ${S.marketTab === 'skills' ? '<button class="btn primary" id="mkAdd" type="button">新建技能</button>' : ''}
       ${S.marketTab === 'experts' ? '<button class="btn primary" id="mkAddEx" type="button">新建人设</button>' : ''}
+      ${S.marketTab === 'agents' ? '<button class="btn primary" id="mkAddAgentTop" type="button">新建 Agent</button>' : ''}
       ${S.marketTab === 'tools' ? '<button class="btn primary" id="mkAddPackTop" type="button">新建工具包</button>' : ''}
     </div>
     <div id="mkBody"></div>`);
@@ -2953,6 +2954,9 @@ export async function renderMarket() {
     // 另一个就变成点了没反应的死按钮。
     $('#mkAddPack')?.addEventListener('click', () => editToolPack(null, caps.groups));
     $('#mkAddPackTop')?.addEventListener('click', () => editToolPack(null, caps.groups));
+    // 子 Agent 页签的主操作也提到顶部 —— 四个页签的主入口位置一致，
+    // 不用每个页签的按钮位置都不一样（有的在顶部、有的在表单里）。
+    $('#mkAddAgentTop')?.addEventListener('click', () => editAgent(null));
     $('#mkImportPack')?.addEventListener('click', importToolPack);
     if (packs.length) {
       bindUCards($('#mkPackGrid'), (act, data) => {

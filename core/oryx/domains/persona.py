@@ -126,7 +126,7 @@ async def expert_detail(agent, expert_id: str) -> dict:
     if not e:
         raise HTTPException(404, "没有这个人设")
     # 内核只回传解析后的头部，正文（frontmatter 之后那部分）仍要从文件读
-    from ..experts import FRONTMATTER
+    from ..frontmatter import FRONTMATTER
 
     body = ""
     body_path = expert_dir(expert_id) / "EXPERT.md"
@@ -192,7 +192,7 @@ async def agent_detail(agent, agent_id: str) -> dict:
     if not a:
         raise HTTPException(404, "没有这个子 Agent")
     # 内核只回头部，正文仍从文件读
-    from ..agents import FRONTMATTER
+    from ..frontmatter import FRONTMATTER
 
     body = ""
     body_path = agent_dir(agent_id) / "AGENT.md"
