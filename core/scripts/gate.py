@@ -92,6 +92,18 @@ def main() -> int:
              "-p", "no:warnings", "-p", "no:cacheprovider", "--tb=short"],
             CORE,
         ),
+        (
+            # 前端模块的 import 断链。
+            # ESM 在**链接期**解析导入 —— 导一个不存在的名字，
+            # 浏览器报 SyntaxError，**整个模块都不加载**，
+            # 而且不报任何错到界面上（模块直接不执行）。
+            # 实测过：把一个函数搬了家忘了改导入，
+            # 结果顶栏的交互模式/人设/风格/模式/权限全都不绑定，
+            # 界面看着正常，一点就废。这种错只能靠脚本盯。
+            "前端模块 import 不断链",
+            [PY, "tests/check_web_imports.py"],
+            CORE,
+        ),
     ]
     if not args.fast:
         checks.append(

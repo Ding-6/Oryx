@@ -7,6 +7,7 @@ import { connect } from './agui.js';
 import { autoCollapse, fitTopbar } from './layout.js';
 import { loadSessions, loadTeams, loadWorkflowRuns, loadWorkflowTemplates, openSession, refreshState, setLocalOpen, setView, paintWelcome } from './models.js';
 import { applyBg, applyTheme } from './theme.js';
+import { applyDefaultPolicy } from './policy.js';
 import { $, api, applyClamp, bus, S, toast } from './core.js';
 import { loadUiExtensions } from './uiext.js';
 import './promptopt.js';
@@ -48,6 +49,9 @@ clampObserver.observe(document.body, { childList: true, subtree: true });
 
 /* ══════ 启动 ══════ */
 (async () => {
+  // 恢复上次记住的「默认权限」—— 选过就一直管着后面的每一轮
+  applyDefaultPolicy();
+
   // 恢复上次拖过的栏宽与折叠状态
   for (const v of ['--rail-w', '--side-w']) {
     const saved = localStorage.getItem(v);

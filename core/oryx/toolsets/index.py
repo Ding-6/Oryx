@@ -104,6 +104,12 @@ class IndexToolsMixin:
             fn=_index_scan,
         )
 
+        def _pip_cmd(package: str) -> str:
+            # 用当前解释器的 pip —— 裸 pip 可能指向别的 Python
+            import sys as _sys
+
+            return f'"{_sys.executable}" -m pip install {package}'
+
         def _ocr_image(path: str) -> dict[str, Any]:
             from .. import ocr as _ocr
             from ..ocr import ocr_image
@@ -111,7 +117,7 @@ class IndexToolsMixin:
             if not _ocr.available():
                 self._announce_degradation(
                     "图片 OCR", "未安装 rapidocr-onnxruntime，本次无法识别图片文字",
-                    "pip install rapidocr-onnxruntime 后重启即可使用",
+                    _pip_cmd("rapidocr-onnxruntime") + " 后重启即可使用",
                 )
             result = ocr_image(path)
             if not result.get("ok"):

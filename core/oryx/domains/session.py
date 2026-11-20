@@ -46,19 +46,34 @@ TODO_STATUSES = ("pending", "in_progress", "done")
 
 
 class RenameRequest(BaseModel):
-    """改名请求。
+    """改会话的请求。
 
     `title` 传空串 = 撤掉自定义名字，退回用首条提问当标题。
     传 null 也当空串 —— 前端表单清空时给的就是 null，
     以前 `str(None)` 会把字面量 "None" 存成会话名。
+
+    `team` = 给这个会话挂一个团队（每个对话可以有自己的团队）。
+    不传 = 不动它（`None` 与空串的区别：空串是「摘掉团队」）。
     """
 
-    title: str = ""
+    title: str | None = None
+    team: str | None = None
 
     @field_validator("title", mode="before")
     @classmethod
     def _null_to_empty(cls, value):
         return "" if value is None else value
+
+
+class TodoCreateRequest(BaseModel):
+    """新建一条待办。
+
+    用户在对话里手动加一件事 —— 以前只有 agent 能建（task_create 工具），
+    用户想自己列个清单都做不到。
+    """
+
+    title: str = ""
+    status: str = "pending"
 
 
 class TodoStatusRequest(BaseModel):
@@ -125,6 +140,43 @@ def session_usage(store: Store, task_id: str) -> dict:
     }
 
 
+def create_todo(store: Store, task_id: str, title: str, status: str = "pending") -> dict:
+    """新建一条待办 —— 用户手动加。
+
+    状态取值校验跟改状态一致：pending / in_progress / done。
+    """
+    title = (title or "").strip()
+    if not title:
+        raise HTTPException(400, "待办得有个标题")
+    if len(title) > 200:
+        raise HTTPException(400, "标题太长了（最多 200 字）")
+    status = (status or "pending").strip()
+    if status not in TODO_STATUSES:
+        raise HTTPException(400, "status 只能是 pending / in_progress / done")
+    if store.session_detail(task_id) is None:
+        raise HTTPException(404, "没有这个会话")
+    return store.add_todo(task_id, title)
+
+
+def todo_progress(todos: list[dict]) -> dict:
+    """待办的进度摘要 —— 给界面画进度条用。
+
+    「完成」和「进行中」都算有进展（进行中说明已经动过了），
+    只算完全没开始的才算未推进。
+    """
+    total = len(todos or [])
+    done = sum(1 for t in (todos or []) if t.get("status") == "done")
+    doing = sum(1 for t in (todos or []) if t.get("status") == "in_progress")
+    return {
+        "total": total,
+        "done": done,
+        "in_progress": doing,
+        "pending": total - done - doing,
+        # 百分比取整 —— 「33%」比「33.333333%」好看
+        "percent": int(round((done + doing) * 100 / total)) if total else 0,
+    }
+
+
 def update_todo_status(store: Store, task_id: str, todo_id: str, status: str) -> dict:
     """改待办的状态 —— 用户在右栏「任务」标签里直接勾。
 
@@ -141,6 +193,19 @@ def update_todo_status(store: Store, task_id: str, todo_id: str, status: str) ->
     return {"updated": todo_id, "todo": todo}
 
 
+def set_session_team(store: Store, task_id: str, team: str) -> dict:
+    """给会话挂一个团队。
+
+    「每个对话可以有一个自己的团队」——
+    团队是全局的，会话是私人的，这一列把两者挂起来。
+    传空串 = 摘掉这个会话的团队。
+    """
+    name = (team or "").strip()
+    if not store.set_session_team(task_id, name):
+        raise HTTPException(404, "没有这个会话")
+    return {"task_id": task_id, "team": name}
+
+
 def rename_session(store: Store, task_id: str, title: str) -> dict:
     """给会话改个名字。
 
@@ -150,6 +215,32 @@ def rename_session(store: Store, task_id: str, title: str) -> dict:
     if not store.rename_session(task_id, title):
         raise HTTPException(404, "没有这个会话")
     return {"renamed": task_id, "title": (title or "").strip()}
+
+
+def update_session(store: Store, task_id: str, title: str | None, team: str | None) -> dict:
+    """改会话：名字 + 挂的团队，可以只改其中一个。
+
+    **为什么合并成一个接口**
+    ----------------------
+    「改名」和「挂团队」都是改同一行 tasks 的属性，
+    分成两个接口就得发两次请求，还容易出现「改了名但团队没跟上」的中间态。
+
+    `title` / `team` 传 None = 那项不动；传空串 = 撤掉。
+    """
+    if title is not None:
+        if not store.rename_session(task_id, title):
+            raise HTTPException(404, "没有这个会话")
+    if team is not None:
+        if not store.set_session_team(task_id, team):
+            raise HTTPException(404, "没有这个会话")
+    # 返回**改完之后**的实际值 —— 只改名字时 team 也得报当前挂着的那一个，
+    # 否则前端会把「没动过的团队」显示成空（刚挂上的团队会凭空消失）。
+    detail = store.session_detail(task_id) or {}
+    return {
+        "task_id": task_id,
+        "title": str(detail.get("title") or ""),
+        "team": store.session_team(task_id),
+    }
 
 
 # ── 装配 ────────────────────────────────────────────────────────────
@@ -172,7 +263,7 @@ def register(app, store: Store) -> None:
 
     @router.put("/{task_id}")
     async def _rename(task_id: str, req: RenameRequest):
-        return ok(rename_session(store, task_id, req.title))
+        return ok(update_session(store, task_id, req.title, req.team))
 
     @router.put("/{task_id}/todos/{todo_id}")
     async def _update_todo(task_id: str, todo_id: str, req: TodoStatusRequest):
@@ -185,6 +276,15 @@ def register(app, store: Store) -> None:
     @router.get("/{task_id}/todos")
     async def _todos(task_id: str):
         return ok(session_todos(store, task_id))
+
+    @router.post("/{task_id}/todos")
+    async def _create_todo(task_id: str, req: TodoCreateRequest):
+        """用户手动加一条待办。
+
+        以前只有 agent 能建待办（task_create 工具），
+        用户想自己列个清单都做不到 —— 右栏「任务」里只能看不能加。
+        """
+        return ok(create_todo(store, task_id, req.title, req.status))
 
     @router.get("/{task_id}/usage")
     async def _usage(task_id: str):

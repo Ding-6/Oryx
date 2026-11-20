@@ -440,3 +440,58 @@
     padding:7px 2px 9px;
     font-size:var(--fs-sm);
   }
+
+  /* ── 任务进度条 + 添加任务 ──────────────────────────────────────
+     任务以前只能看、不能改 —— 右栏「任务」里点一下能勾完成，
+     但**加一条**做不到（只有 agent 能建）。
+     现在右栏和对话里都能加。
+     ──────────────────────────────────────────────────────────── */
+  .todohead { margin-bottom:10px; }
+  .tprog { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .tbar {
+    flex:1 1 auto; height:6px; border-radius:999px;
+    background:var(--panel-2); overflow:hidden;
+  }
+  .tbar > i {
+    display:block; height:100%; border-radius:999px;
+    background:var(--accent);
+    transition:width .3s var(--ease);
+  }
+  .tnum { flex:0 0 auto; font-size:11.5px; color:var(--muted); font-family:var(--font-mono); }
+  .tadd { display:flex; gap:6px; }
+  .tadd .inp { flex:1 1 auto; min-width:0; }
+
+  /* ── 对话里的任务条 ────────────────────────────────────────────
+     任务清单挂在**会话**上，用户一眼看不到就等于没有。
+     现在在对话流末尾放一条：有任务才出现，折叠时只占一行。
+     ──────────────────────────────────────────────────────────── */
+  .todopanel {
+    margin:18px 0 6px;
+    border:1px solid var(--line);
+    border-radius:14px;
+    background:var(--card);
+    overflow:hidden;
+  }
+  .todopanel .tphead {
+    display:flex; align-items:center; gap:9px;
+    padding:10px 14px; cursor:pointer; user-select:none;
+  }
+  .todopanel .tphead:hover { background:var(--panel-2); }
+  .todopanel .tpchev { color:var(--muted); font-size:11px; width:10px; flex:0 0 10px; }
+  .todopanel .tptitle { font-size:12.5px; font-weight:650; color:var(--ink); flex:0 0 auto; }
+  .todopanel .tpbar {
+    flex:1 1 auto; height:5px; border-radius:999px;
+    background:var(--panel-2); overflow:hidden;
+  }
+  .todopanel .tpbar > i {
+    display:block; height:100%; border-radius:999px;
+    background:var(--accent); transition:width .3s var(--ease);
+  }
+  .todopanel .tpnum {
+    flex:0 0 auto; font-size:11px; color:var(--muted);
+    font-family:var(--font-mono);
+  }
+  .todopanel .tpbody { padding:2px 12px 12px; }
+  .todopanel .todo { margin-bottom:4px; }
+  .todopanel .tpadd { display:flex; gap:6px; margin-top:8px; }
+  .todopanel .tpadd .inp { flex:1 1 auto; min-width:0; }

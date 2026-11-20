@@ -3,7 +3,7 @@
    改动前先看 docs/FRONTEND-MODULES.md 的依赖说明。
  */
 
-import { addFiles, applyScene, switchSideView, openSession, autoGrow, setView } from './models.js';
+import { addFiles, applyScene, switchSideView, openSession, openWorkflowPicker, autoGrow, setView } from './models.js';
 import { handlePaste, importFromClipboard } from './paste.js';
 import { openPerm } from './policy.js';
 import { openSkills } from './skillcall.js';
@@ -16,37 +16,23 @@ import { applyTheme } from './theme.js';
 $('#fileBtn').addEventListener('click', addFiles);
 $('#skillBtn').addEventListener('click', openSkills);
 
-/* 「更多设置」= 优化表达 / 调用技能 / 默认权限 三项的入口。
-   设计稿的输入框底部只有三个按钮（上传文件 / 连接知识库 / 更多设置），
-   但这三项功能一个都不能少 —— 收进一个菜单里，
-   既贴合设计稿，又不丢能力。 */
-$('#moreBtn').addEventListener('click', () => {
-  openModal({
-    title: '更多设置',
-    body: `<div class="picklist">
-      <button class="pick" data-more-item="opt" type="button">
-        <span class="pk">✦</span>
-        <span><span class="pt">优化这句表达</span><div class="pd">把这句话改得更清楚、更可执行</div></span>
-      </button>
-      <button class="pick" data-more-item="skill" type="button">
-        <span class="pk">⚡</span>
-        <span><span class="pt">调用技能</span><div class="pd">为这一轮绑定技能</div></span>
-      </button>
-      <button class="pick" data-more-item="perm" type="button">
-        <span class="pk">🛡</span>
-        <span><span class="pt">默认权限</span><div class="pd">设置这一轮的动作权限</div></span>
-      </button>
-    </div>`,
-    foot: `<button class="btn" data-close type="button">关闭</button>`,
-  });
-  $$('#modal [data-more-item]').forEach(b => b.addEventListener('click', () => {
-    const k = b.dataset.moreItem;
-    closeModal();
-    if (k === 'opt') openPromptOpt();
-    else if (k === 'skill') openSkills();
-    else if (k === 'perm') openPerm();
-  }));
-});
+/* 「更多设置」已下架。
+ *
+ * 原来它是个弹层，装了「优化表达 / 调用技能 / 默认权限」三项：
+ *   · 「调用技能」跟工具栏上的按钮**是同一个功能**（都调 openSkills），
+ *     只是标签写得不一样 —— 纯重复项；
+ *   · 「优化表达」现在平铺在工具栏里，跟「上传文件」并列；
+ *   · 「默认权限」挪到顶栏的设置下拉，跟交互模式并排。
+ *
+ * 多一层菜单只为放两个按钮，藏得比露得深 —— 而且点进去才发现
+ * 「连接知识库」和「调用技能」是同一件事。
+ */
+
+// 「优化表达」平铺进工具栏
+$('#optBtn')?.addEventListener('click', () => openPromptOpt());
+
+// 「工作流」：在对话里直接选模板跑
+$('#wfBtn')?.addEventListener('click', () => openWorkflowPicker());
 
 // 输入框顶部的场景预设：一键切这一轮用什么能力
 $$('#sceneBar .scene').forEach(b => {

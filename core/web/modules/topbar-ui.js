@@ -4,8 +4,13 @@
  */
 
 import { closeModal, openModal } from './modal.js';
-import { badge, loadModelData, paintModeHint, refreshState } from './models.js';
-import { $, $$, S, api, esc, escAttr, toast } from './core.js';
+import { badge, loadModelData, paintModeHint, refreshState, POLICY_LABEL } from './models.js';
+import { applyDefaultPolicy } from './policy.js';
+// setDefaultPolicy 在 core.js —— policy.js 只留「把它落到当前这一轮」的活。
+// （从 policy.js 导它会**链接期报错**：那个导出已经搬走了。
+//  ESM 链接失败会让**整个模块**加载失败 —— topbar-ui.js 一挂，
+//  顶栏的交互模式/人设/风格/模式/权限就全都不绑定了。）
+import { $, $$, S, api, esc, escAttr, setDefaultPolicy, toast } from './core.js';
 
 /* ══════ 顶栏交互 ══════ */
 
@@ -80,6 +85,20 @@ $('#styleSel').addEventListener('change', async e => {
 });
 $('#modeSel').addEventListener('change', async e => {
   await setComputeMode(e.target.value);
+});
+
+/* 「默认权限」下拉。
+ *
+ * 原来它藏在「更多设置」弹层里（要点两层才够得到），现在跟交互模式并排
+ * 放在设置下拉里 —— 权限和模式本来就是一回事：「这一轮能做到哪一步」。
+ *
+ * 选中后**记住**（localStorage），之后每一轮都按这个权限走；
+ * 选「跟随交互模式」就清掉记忆，回到原来的行为。
+ */
+$('#permSel')?.addEventListener('change', e => {
+  const v = setDefaultPolicy(e.target.value);
+  applyDefaultPolicy();
+  toast(v ? `默认权限：${POLICY_LABEL[v]}` : '默认权限：跟随交互模式');
 });
 
 /**

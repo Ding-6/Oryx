@@ -1,18 +1,16 @@
-"""环境自检：现在这台机器上 Oryx 能干什么、缺什么、下一步能做什么。
+"""环境体检：缺什么、怎么补。
 
-抄自 Marvis 的 `core/doctor.py`，但按 Oryx 的形态重做。
+**为什么要用绝对路径**
+--------------------
+提示里写 `pip install xxx` 是**错的** ——
+PATH 上的 `pip` 未必是这个 Oryx 正在用的 Python 的 pip。
 
-Marvis 那边是 CLI + MCP server，自检是「告诉我这个环境能跑什么命令」；
-Oryx 是桌面应用，自检要回答的是另一个问题：
-**用户看到界面出问题时，怎么一眼看出是哪一环坏了。**
+实测过：PATH 上的 pip 指向的是 WorkBuddy 的 Python
+（``C://Users//<user>//.workbuddy//binaries//python//envs//default//Scripts//pip``），
+而 Oryx 跑在 ``D://Python//Python311`` —— 照提示装，包装到别的 Python 里去了，
+Oryx 这边照样报「未安装」，用户完全不知道问题在哪。
 
-三条硬约束（照抄 Marvis 的纪律）：
-1. **不访问网络** —— 自检不发一个包。要测模型通不通得真的调，那不是自检。
-2. **不扫描用户文件** —— 只看 Oryx 自己的数据目录。
-3. **给可执行的建议** —— hints 里的每一条都是能直接照做的，不是"建议检查网络"。
-
-自证字段 `destructive_ops` 沿用 Marvis 的做法：恒为 "preview"，
-明确告诉用户「危险操作默认只预览，要改得显式确认」。
+所以提示里一律给**绝对路径**：``<这个解释器> -m pip install <包>``。
 """
 
 from __future__ import annotations
@@ -454,3 +452,14 @@ def _version() -> str:
         return __version__
     except Exception:
         return "unknown"
+
+
+def pip_install_cmd(package: str) -> str:
+    """装包的命令（用**当前解释器**的 pip）。
+
+    用 ``sys.executable -m pip`` 而不是裸 ``pip`` ——
+    裸 pip 可能指向别的 Python（见模块说明）。
+    """
+    import sys
+
+    return f'"{sys.executable}" -m pip install {package}'

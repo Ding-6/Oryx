@@ -331,7 +331,10 @@ class Store:
             {"mutated": "INTEGER"},
         )
         # 会话标题（用户改名后的名字）。没有它就退回 goal[:40]。
-        self._ensure_columns(self.conv_path, "tasks", {"title": "TEXT"})
+        # team = 这个会话挂着的团队（名字）。
+        # 「每个对话可以有一个自己的团队」—— 团队是全局的，会话是私人的，
+        # 靠这一列把两者挂起来。
+        self._ensure_columns(self.conv_path, "tasks", {"title": "TEXT", "team": "TEXT"})
         # 检查点记录当时的步骤数 —— 回退对话时要一起裁掉那些执行记录。
         self._ensure_columns(self.conv_path, "checkpoints", {"step_count": "INTEGER DEFAULT 0"})
 
@@ -493,6 +496,31 @@ class Store:
             "today": int(row["today"]),
         }
 
+    def set_session_team(self, task_id: str, team: str) -> bool:
+        """给会话挂一个团队（传空串 = 摘掉）。
+
+        团队是全局的（/api/teams），会话是私人的 —— 这一列把两者挂起来：
+        打开这个会话就带着这个团队，agent 派活时也知道该派给谁。
+        """
+        name = (team or "").strip()
+        if len(name) > 60:
+            name = name[:60]
+        with self._lock, self._conn() as conn:
+            exists = conn.execute("SELECT 1 FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if not exists:
+                return False
+            conn.execute(
+                "UPDATE tasks SET team=?, updated_at=? WHERE id=?",
+                (name, time.time(), task_id),
+            )
+        return True
+
+    def session_team(self, task_id: str) -> str:
+        """这个会话挂着哪个团队（没有就是空串）。"""
+        with self._conn() as conn:
+            row = conn.execute("SELECT team FROM tasks WHERE id=?", (task_id,)).fetchone()
+        return (row["team"] if row else "") or ""
+
     def rename_session(self, task_id: str, title: str) -> bool:
         """给会话改个名字。
 
@@ -520,6 +548,8 @@ class Store:
         return {
             "task": task,
             "title": named,
+            # 这个会话挂着的团队（每个对话可以有自己的团队）
+            "team": (task.get("team") or "").strip(),
             "messages": self.messages_for_task(task_id),
             "steps": self.steps_for_task(task_id),
             "todos": self.list_todos(task_id),

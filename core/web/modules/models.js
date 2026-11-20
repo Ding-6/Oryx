@@ -8,7 +8,7 @@ import { hideThinking } from './events.js';
 import { _modalGen, closeModal, openModal } from './modal.js';
 import { sessGroup, sessStatus } from './session.js';
 import { applyBg, applyTheme, paintBg } from './theme.js';
-import { $, $$, DOC_STAT_CN, S, api, bus, cnAgent, cnGroup, cnSkill, cnTool, dataOf, esc, escAttr, md, mut, toast } from './core.js';
+import { $, $$, DOC_STAT_CN, S, api, bus, cnAgent, cnGroup, cnSkill, cnTool, dataOf, errText, esc, escAttr, getDefaultPolicy, md, mut, toast } from './core.js';
 
 /* ══════ 视图 ══════ */
 export function setView(v) {
@@ -811,6 +811,8 @@ export async function openSession(id) {
   // 空历史会话（比如刚建还没问）给引导，别让人对着一片空白发愣
   paintWelcome();
   S.steps.clear(); S.artifacts = [];
+  // 这个会话挂着的团队（每个对话可以有自己的团队）
+  S.sessionTeam = d.team || '';
   renderTodos(d.todos || []);
   renderSteps(d.steps || []);
   renderFiles();
@@ -933,6 +935,9 @@ export async function refreshState() {
       ss.innerHTML = s.styles.map(x => `<option value="${x.name}">${esc(x.label)}</option>`).join('');
     }
     ss.value = s.style;
+    // 「默认权限」下拉要显示记住的那一档（空 = 跟随交互模式）
+    const ps = $('#permSel');
+    if (ps) ps.value = getDefaultPolicy();
     paintModeHint();
     // 内核起没起来 —— 状态从「没起来」翻成「起来了」时，
     // 把之前因为内核没就绪而跳过的数据补上。
@@ -1100,19 +1105,156 @@ export function renderSteps(steps) {
 export function renderTodos(todos) {
   S.todos = todos || [];
   const p = $('#p-todos');
-  if (!S.todos.length) { p.innerHTML = '<div class="empty">没有待办</div>'; return; }
+  const list = S.todos;
+  // 对话里的任务条跟着一起更新（右栏 + 对话流，两处一致）
+  paintTodoPanel();
   const mk = { done: '✓', in_progress: '▸', pending: '○' };
-  // **可点击** —— 用户在右栏直接勾掉一件事，不用去别处改。
-  // 没有 id 的（比如还没落库的）就不可点。
-  p.innerHTML = S.todos.map(t => {
-    const clickable = t.id ? ' todo-click' : '';
-    const idAttr = t.id ? ` data-todo="${esc(String(t.id))}"` : '';
-    return `<div class="todo ${t.status}${clickable}"${idAttr}`
-      + ` role="button" tabindex="${t.id ? '0' : '-1'}"`
-      + ` title="${t.id ? '点击切换完成状态' : ''}">`
-      + `<span class="mk">${mk[t.status] || '○'}</span>`
-      + `<span class="tx">${esc(t.title)}</span></div>`;
-  }).join('');
+  // 进度：完成 + 进行中 都算有进展
+  const done = list.filter(t => t.status === 'done').length;
+  const doing = list.filter(t => t.status === 'in_progress').length;
+  const pct = list.length ? Math.round((done + doing) * 100 / list.length) : 0;
+
+  // 进度条 + 添加框 —— 这块以前只能看不能改。
+  //
+  // 「任务可以添加」是用户明确要的：以前只有 agent 能建待办
+  // （task_create 工具），用户想自己列个清单都做不到。
+  const head = `<div class="todohead">
+      <div class="tprog"><div class="tbar"><i style="width:${pct}%"></i></div>
+        <span class="tnum">${done}/${list.length}${doing ? ` · ${doing} 进行中` : ''}</span></div>
+      <form class="tadd" id="todoAddForm">
+        <input class="inp" id="todoAddInput" placeholder="添加一项任务…" aria-label="新任务标题" maxlength="200"/>
+        <button class="btn" type="submit">添加</button>
+      </form>
+    </div>`;
+
+  if (!list.length) {
+    p.innerHTML = head + '<div class="empty">还没有任务<br><span style="font-size:11.5px;opacity:.7">上面加一条，或让 Oryx 在执行时自己维护</span></div>';
+  } else {
+    p.innerHTML = head + list.map(t => {
+      const clickable = t.id ? ' todo-click' : '';
+      const idAttr = t.id ? ` data-todo="${esc(String(t.id))}"` : '';
+      return `<div class="todo ${t.status}${clickable}"${idAttr}`
+        + ` role="button" tabindex="${t.id ? '0' : '-1'}"`
+        + ` title="${t.id ? '点击切换完成状态' : ''}">`
+        + `<span class="mk">${mk[t.status] || '○'}</span>`
+        + `<span class="tx">${esc(t.title)}</span></div>`;
+    }).join('');
+  }
+
+  // 添加任务
+  const form = $('#todoAddForm');
+  if (form && !form.dataset.bound) {
+    form.dataset.bound = '1';
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const inp = $('#todoAddInput');
+      const title = (inp?.value || '').trim();
+      if (!title || !S.current) return;
+      inp.value = '';
+      try {
+        await api(`/api/sessions/${encodeURIComponent(S.current)}/todos`, {
+          method: 'POST', body: JSON.stringify({ title }),
+        });
+        await loadTodos();
+      } catch (ex) {
+        const e2 = await ex.json?.().catch(() => ({}));
+        toast('添加任务失败：' + (e2.detail || e2.message || ex.message || '未知错误'));
+      }
+    });
+  }
+}
+
+/** 重新拉当前会话的待办。 */
+export async function loadTodos() {
+  if (!S.current) { renderTodos([]); return; }
+  try {
+    const d = dataOf(await (await api(`/api/sessions/${encodeURIComponent(S.current)}/todos`)).json());
+    renderTodos(Array.isArray(d) ? d : (d?.todos || []));
+  } catch (_) {
+    renderTodos(S.todos);
+  }
+}
+
+/* ── 对话里的任务条 ──────────────────────────────────────────────
+   任务以前只活在右栏的「任务」页签里 —— 用户得把视线移到右边的窄栏
+   才看得到进度。而且清单建在**会话**上，不跟着滚动。
+
+   现在在对话流末尾放一条：**有任务才出现**，
+   折叠时只占一行（进度条 + 计数），展开看清单，还能直接加一条。
+   agent 建的任务（task_create）也会实时反映到这里 ——
+   todos.updated 事件走的是同一个 renderTodos。
+   ──────────────────────────────────────────────────────────── */
+function paintTodoPanel() {
+  const box = $('#messages');
+  if (!box) return;
+  let el = $('#todoPanel');
+  const list = S.todos || [];
+
+  if (!list.length) {
+    if (el) el.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'todoPanel';
+    el.className = 'todopanel';
+    box.appendChild(el);
+  }
+
+  const done = list.filter(t => t.status === 'done').length;
+  const doing = list.filter(t => t.status === 'in_progress').length;
+  const pct = list.length ? Math.round((done + doing) * 100 / list.length) : 0;
+  const mk = { done: '✓', in_progress: '▸', pending: '○' };
+
+  el.innerHTML = `<div class="tphead" id="tpToggle" role="button" tabindex="0"
+        aria-expanded="${S.todoPanelOpen ? 'true' : 'false'}">
+      <span class="tpchev" aria-hidden="true">${S.todoPanelOpen ? '▾' : '▸'}</span>
+      <span class="tptitle">任务</span>
+      <span class="tpbar"><i style="width:${pct}%"></i></span>
+      <span class="tpnum">${done}/${list.length}${doing ? ` · ${doing} 进行中` : ''}</span>
+    </div>
+    <div class="tpbody"${S.todoPanelOpen ? '' : ' hidden'}>
+      ${list.map(t => `<div class="todo ${t.status}${t.id ? ' todo-click' : ''}"
+          ${t.id ? `data-todo="${esc(String(t.id))}"` : ''}
+          role="button" tabindex="${t.id ? '0' : '-1'}"
+          title="${t.id ? '点击切换完成状态' : ''}">
+          <span class="mk">${mk[t.status] || '○'}</span>
+          <span class="tx">${esc(t.title)}</span></div>`).join('')}
+      <form class="tpadd" id="tpAddForm">
+        <input class="inp" id="tpAddInput" placeholder="添加一项任务…" aria-label="新任务标题" maxlength="200"/>
+        <button class="btn" type="submit">添加</button>
+      </form>
+    </div>`;
+
+  // 折叠/展开
+  const head = $('#tpToggle');
+  const toggle = () => {
+    S.todoPanelOpen = !S.todoPanelOpen;
+    paintTodoPanel();
+  };
+  head?.addEventListener('click', toggle);
+  head?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+  });
+
+  // 添加任务
+  const form = $('#tpAddForm');
+  form?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const inp = $('#tpAddInput');
+    const title = (inp?.value || '').trim();
+    if (!title || !S.current) return;
+    inp.value = '';
+    try {
+      await api(`/api/sessions/${encodeURIComponent(S.current)}/todos`, {
+        method: 'POST', body: JSON.stringify({ title }),
+      });
+      await loadTodos();
+    } catch (ex) {
+      const e2 = await ex.json?.().catch(() => ({}));
+      toast('添加任务失败：' + (e2.detail || e2.message || ex.message || '未知错误'));
+    }
+  });
 }
 
 /** 切换一个待办的完成状态（点一下 pending ↔ done）。 */
@@ -1582,6 +1724,24 @@ export async function teamForm({ id = '', name = '', goal = '', members = [] } =
 }
 
 /* ── 团队协作面板 ── */
+/* 协作面板里的「挂到当前对话」。
+ *
+ * 团队是全局的，会话是私人的 —— 以前两者没有关联，
+ * 一个团队开了十几个对话都用它，成员分不清自己这一轮属于谁。
+ * 现在可以把团队挂到当前对话上：
+ *   · 挂着的对话，agent 知道该派给谁；
+ *   · 换对话时自动带上/摘掉对应团队。
+ */
+function _sessionTeamRow(teamName) {
+  const cur = S.sessionTeam || '';
+  const on = cur === teamName;
+  return `<div class="row" style="margin-bottom:14px;align-items:center">
+      <span style="font-size:12px;color:var(--muted)">当前对话</span>
+      <span style="flex:1;font-size:12.5px;color:var(--ink-2)">${on ? '已挂「' + esc(teamName) + '」' : '未挂团队'}</span>
+      <button class="btn" id="tpAttach" type="button">${on ? '摘掉' : '挂到这个对话'}</button>
+    </div>`;
+}
+
 async function openTeamPanel(teamName) {
   let d;
   try { d = await (await api(`/api/teams/${encodeURIComponent(teamName)}`)).json(); }
@@ -1603,6 +1763,7 @@ async function openTeamPanel(teamName) {
             ${allTeams.map(x => `<option value="${escAttr(x.name)}" ${x.name === t.name ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}
           </select>
         </div>` : ''}
+        ${_sessionTeamRow(t.name)}
         ${t.goal ? `<div class="teamcard" style="margin-bottom:14px"><div class="tgoal" style="margin:0">${esc(t.goal)}</div></div>` : ''}
         <div class="sect" style="margin-bottom:16px"><h2>成员与分工</h2>
           <div id="tpMembers">${(t.members || []).map(m => `
@@ -1634,6 +1795,23 @@ async function openTeamPanel(teamName) {
              <button class="btn" data-close type="button">关闭</button>
              <button class="btn" id="tpEdit" type="button">编辑团队</button>
              <button class="btn primary" id="tpAuto" type="button">按顺序跑完全部成员</button>`,
+    });
+    // 挂到当前对话 / 摘掉
+    const attach = $('#tpAttach');
+    if (attach) attach.addEventListener('click', async () => {
+      if (!S.current) { toast('先开个对话'); return; }
+      const next = (S.sessionTeam === t.name) ? '' : t.name;
+      try {
+        const r = await api(`/api/sessions/${encodeURIComponent(S.current)}`, {
+          method: 'PUT', body: JSON.stringify({ team: next }),
+        });
+        if (!r.ok) { toast('挂载失败：' + errText(await r.json().catch(() => ({})))); return; }
+        S.sessionTeam = next;
+        toast(next ? `已把「${t.name}」挂到这个对话` : '已摘掉这个对话的团队');
+        paint();
+      } catch (ex) {
+        toast('挂载失败：' + (ex && ex.message ? ex.message : ex));
+      }
     });
     // 编辑团队：改名 + 改目标
     const editBtn = $('#tpEdit');
@@ -1738,7 +1916,16 @@ async function openTeamPanel(teamName) {
         const txt = await r.text();
         let content = '';
         try { content = JSON.parse(txt).content || ''; } catch (_) { content = txt; }
-        if (!r.ok) { toast((content || '执行失败').slice(0, 90)); paint(); return; }
+        // 失败原因要从**几种响应形状**里都取得到 ——
+        // v2 规范用 detail/message，老接口用 content，
+        // 只读 content 的话失败就只剩一句「执行失败」。
+        if (!r.ok) {
+          let why = content;
+          try { why = errText(JSON.parse(txt), content); } catch (_) { /* 用原文 */ }
+          toast('派活失败：' + why);
+          paint();
+          return;
+        }
         toast(`${a} 已回话`);
         try { t = await (await api(`/api/teams/${encodeURIComponent(t.name)}`)).json(); } catch (_) {}
         paint(); loadTeams();
@@ -1764,7 +1951,10 @@ async function openTeamPanel(teamName) {
           await api(`/api/teams/${encodeURIComponent(t.name)}/message`, { method: 'POST', body: JSON.stringify({ to: m.agent_id, content: brief }) });
           const r = await api(`/api/teams/${encodeURIComponent(t.name)}/dispatch`, { method: 'POST', body: JSON.stringify({ agent: m.agent_id }) });
           S.teamBusy.delete(key);
-          if (!r.ok) { const e = await r.json().catch(() => ({ content: '' })); toast(cnAgent(m.agent_id) + ' 失败：' + (e.content || '').slice(0, 70)); }
+          if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            toast(cnAgent(m.agent_id) + ' 失败：' + errText(e, '没有说明原因'));
+          }
         }
         try { t = await (await api(`/api/teams/${encodeURIComponent(t.name)}`)).json(); } catch (_) {}
         paint(); loadTeams(); toast('团队跑完一轮');
@@ -2209,24 +2399,49 @@ export function paintAttbar() {
   paintModeHint();
 }
 
-export const POLICY_LABEL = { readonly: '只读', guarded: '受控', full: '完整' };
+export const POLICY_LABEL = { readonly: '只读', guarded: '受控', full: '完整', unrestricted: '完全访问' };
 export const POLICY_DESC = {
   readonly: '只允许读取与检索，不会修改任何文件或设置',
   guarded: '可写入文件、执行命令，删除与改设置前先出计划给你确认',
   full: '开放全部工具，仍对支付与凭据类操作硬拦截',
+  unrestricted: '不做任何审批，直接执行所有操作（支付与凭据类仍被系统规则拦住）',
 };
-export const POLICY_MODE = { readonly: 'ask', guarded: 'plan', full: 'craft' };
+// 权限档 → 交互模式。
+//
+// `unrestricted` 映射到后端的 `bypass`（skip_approval=True）——
+// 那是**唯一**会跳过用户确认的档位，正对应「完全访问，不要任何审批」。
+export const POLICY_MODE = {
+  readonly: 'ask', guarded: 'plan', full: 'craft', unrestricted: 'bypass',
+};
 
 /* ══════ 选择文件（真实系统对话框） ══════ */
 export const HAS_TAURI = typeof window.__TAURI__ !== 'undefined';
 async function pickFiles() {
   if (HAS_TAURI) {
     try {
-      const picked = await window.__TAURI__.dialog.open({ multiple: true, title: '选择要交给 Oryx 的文件' });
-      if (Array.isArray(picked)) return picked;
+      // Tauri v2 的全局 `__TAURI__` **只带 core**，插件的 JS API 不在里面。
+      // dialog 插件的 init-iife.js 只接管了 `window.alert` / `window.confirm`，
+      // 并没有注册 `__TAURI__.dialog` ——
+      // 所以 `__TAURI__.dialog.open` 是 undefined，
+      // 点「上传文件」就报「系统对话框不可用：undefined」。
+      //
+      // 直接调插件的 IPC 通道最稳（不用引 npm 包）：
+      //   invoke('plugin:dialog|open', { options: {...} })
+      const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+      if (!invoke) throw new Error('Tauri IPC 不可用');
+      const picked = await invoke('plugin:dialog|open', {
+        options: { multiple: true, title: '选择要交给 Oryx 的文件' },
+      });
+      if (Array.isArray(picked)) return picked.filter(Boolean);
       if (typeof picked === 'string') return [picked];
       return [];
-    } catch (e) { toast('系统对话框不可用：' + e.message); return null; }
+    } catch (e) {
+      // e.message 在某些错误对象上不存在 —— 直接读会得到 undefined，
+      // 拼出来的提示就是「系统对话框不可用：undefined」，等于没说。
+      const why = (e && (e.message || e.error || String(e))) || '未知原因';
+      toast('系统对话框不可用：' + why);
+      return null;
+    }
   }
   // 浏览器环境退回 input[type=file]，只能拿到文件名；让用户补路径
   return new Promise(resolve => {
@@ -3521,7 +3736,10 @@ export async function renderWorkflows() {
       <button class="${S.wf.tab === 'runs' ? 'on' : ''}" data-wftab="runs" type="button">运行记录 ${rest.length}</button>
       <button class="${S.wf.tab === 'tpl' ? 'on' : ''}" data-wftab="tpl" type="button">模板 ${S.wf.templates.length}</button>
       <div class="spacer"></div>
-      ${S.wf.tab === 'tpl' ? '<button class="btn primary" id="wfTplNew" type="button">新建模板</button>' : ''}
+      <!-- 「新建模板」两个页签都显示。
+           以前只在「模板」页签有 —— 用户停在「运行记录」页签（默认那个）时，
+           整个页面找不到任何创建入口，看着像「只有 agent 能写工作流」。 -->
+      <button class="btn primary" id="wfTplNew" type="button">新建工作流</button>
     </div>
     ${S.wf.tab === 'runs' ? `
     <div class="sect"><h2>历史运行 · ${rest.length}
@@ -3545,7 +3763,11 @@ export async function renderWorkflows() {
           </div></td>
         </tr>`).join('')}
         </tbody></table></div></div>`
-        : `<div class="empty">还没有工作流<br><span style="font-size:11px">在对话里说「用工作流跑这个」，或让 Oryx 对大任务自动编排</span></div>`}
+        : `<div class="empty">还没有工作流<br><span style="font-size:11px">在对话里说「用工作流跑这个」，或让 Oryx 对大任务自动编排</span>
+          <div style="margin-top:14px;display:flex;gap:8px;justify-content:center">
+            <button class="btn primary" id="wfNewFromEmpty" type="button">新建工作流</button>
+            <button class="btn" id="wfGotoTpl" type="button">从起步模板开始</button>
+          </div></div>`}
     </div>` : wfTemplatesHtml()}`);
 
   $$('#page [data-wftab]').forEach(b => b.addEventListener('click', () => {
@@ -3588,6 +3810,12 @@ export async function renderWorkflows() {
 
   const newBtn = $('#wfTplNew');
   if (newBtn) newBtn.addEventListener('click', () => editTemplate(null));
+  // 空状态里的两个入口
+  $('#wfNewFromEmpty')?.addEventListener('click', () => editTemplate(null));
+  $('#wfGotoTpl')?.addEventListener('click', () => {
+    S.wf.tab = 'tpl';
+    renderWorkflows();
+  });
 
   $$('#page [data-wftplrun]').forEach(b => b.addEventListener('click', () => runTemplate(b.dataset.wftplrun)));
   $$('#page [data-wfseed]').forEach(b => b.addEventListener('click', () => {
@@ -3774,6 +4002,67 @@ async function saveRunAsTemplate(runId, runName) {
 
 /* 触发模板。阻塞语义（几分钟）—— 后端一次只能跑一个编排。
    期间按钮置 pending，避免用户以为没点上而连点。 */
+/* 工具栏的「工作流」入口。
+ *
+ * 以前工作流模板只能在「工作流」页面里选 —— 要用就得先跑去那个页面，
+ * 在对话中一句话都说不清楚「用哪个模板跑」。
+ * 现在工具栏里直接选：选一个模板 → 立刻用这个模板开跑。
+ */
+export async function openWorkflowPicker() {
+  await loadWorkflowTemplates(true);
+  const list = S.wf.templates || [];
+  const seeds = WF_TPL_SEEDS.map((t, i) => ({ id: '', seed: t, i }));
+  openModal({
+    title: '选一个工作流',
+    wide: true,
+    body: `<div class="hint" style="margin:0 0 12px">
+        选一个模板直接开跑；也可以只把它的编排填进输入框，自己改。</div>
+      ${list.length ? `<div class="sect"><h2>我的模板 · ${list.length}</h2>
+        <div class="grid">${list.map(t => `
+          <div class="skillcard">
+            <div class="sh"><span class="sname">${esc(t.name || t.id)}</span>
+              <span class="badge">${t.stage_count || 0} 阶段 · ${t.step_count || 0} 步</span></div>
+            ${t.description ? `<div class="sdesc">${esc(t.description)}</div>` : '<div class="sdesc"></div>'}
+            <div class="sfoot">
+              <button class="btn" data-wfrun="${escAttr(t.id)}" type="button">直接跑</button>
+              <button class="btn" data-wffill="${escAttr(t.id)}" type="button">填进输入框</button>
+            </div>
+          </div>`).join('')}</div></div>` : ''}
+      <div class="sect"><h2>起步模板</h2>
+        <div class="grid">${seeds.map(x => `
+          <div class="tpl" data-wfseed2="${x.i}">
+            <div class="ti">${esc(x.seed.icon)}</div><div class="tn2">${esc(x.seed.name)}</div>
+            <div class="td">${esc(x.seed.desc)}</div>
+          </div>`).join('')}</div></div>`,
+    foot: `<button class="btn" data-close type="button">关闭</button>`,
+  });
+  // 直接跑
+  $$('#modal [data-wfrun]').forEach(b => b.addEventListener('click', async () => {
+    closeModal();
+    await runTemplate(b.dataset.wfrun);
+  }));
+  // 填进输入框（自己改）
+  $$('#modal [data-wffill]').forEach(b => b.addEventListener('click', async () => {
+    const t = (S.wf.templates || []).find(x => x.id === b.dataset.wffill);
+    closeModal();
+    if (!t) return;
+    const plan = t.plan || {};
+    const inp = $('#input');
+    if (inp) {
+      inp.value = `用工作流「${t.name || t.id}」来跑：${plan.goal || t.description || ''}`;
+      inp.focus();
+      autoGrow();
+    }
+    toast('编排已填进输入框，确认后回车发送');
+  }));
+  // 起步模板 → 打开编辑器
+  $$('#modal [data-wfseed2]').forEach(b => b.addEventListener('click', () => {
+    const seed = WF_TPL_SEEDS[+b.dataset.wfseed2];
+    closeModal();
+    if (seed) editTemplate(null, seed);
+  }));
+}
+
 async function runTemplate(templateId) {
   if (S.wf.pending.has(templateId)) return;
   S.wf.pending.add(templateId);

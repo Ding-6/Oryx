@@ -26,6 +26,35 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 MAX_LINE = 4000
+
+# 控制台输出的编码候选，按优先级试。
+#
+# **为什么不能写死 utf-8**
+# ----------------------
+# Windows 的命令行工具（cmd / pip / chcp / npm …）输出用的是**系统代码页**，
+# 中文机器上是 GBK(cp936)。按 UTF-8 去解就是满屏「������」。
+#
+# 为什么 UTF-8 排第一
+# ------------------
+# 现在越来越多的工具默认输出 UTF-8（Python 3.6+、Git、Node 都是），
+# 而 GBK 能「碰巧」解出一堆合法但无意义的字符 —— 那比直接报错还难发现。
+#
+# 所以顺序是：**先严格 UTF-8，解不出来再严格 GBK，最后才替换字符兜底**。
+# 严格解码的好处是「解不出��」是明确的信号，不会悄悄给出乱码。
+_CONSOLE_ENCODINGS = ("utf-8", "gbk", "cp936", "latin-1")
+
+
+def _decode_console(raw: bytes) -> str:
+    """把控制台输出的一行字节解成文本。
+
+    纯 ASCII（大部分英文输出）在第一个候选就过了。
+    """
+    for enc in _CONSOLE_ENCODINGS:
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
 DEFAULT_TIMEOUT = 300
 
 if sys.platform == "win32":
@@ -88,17 +117,19 @@ class TerminalService:
                     cwd=session.cwd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    bufsize=1,
+                    # **按字节读，自己解码** ——
+                    # 写死 encoding="utf-8" 会把 Windows 的输出解成乱码：
+                    # cmd / pip / chcp 等工具输出的是**系统代码页**（中文 Windows 是 GBK），
+                    # 按 UTF-8 解出来就是「������」这种鬼东西。
+                    bufsize=0,
                     # 独立进程组：内核退出时能整组收掉，孙进程不会变孤儿
                     creationflags=CREATE_NEW_PROCESS_GROUP
                     | getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
                 session.proc = proc
-                for line in proc.stdout:  # type: ignore[union-attr]
-                    text = line.rstrip("\r\n")
+                assert proc.stdout is not None
+                for raw in iter(proc.stdout.readline, b""):
+                    text = _decode_console(raw).rstrip("\r\n")
                     session.lines.append(text)
                     self._emit("term.output", id=session.id, line=text[:MAX_LINE])
                 session.exit_code = proc.wait(timeout=timeout)

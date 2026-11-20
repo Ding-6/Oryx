@@ -19,6 +19,17 @@ _engine_error: str | None = None
 _lock = threading.Lock()
 
 
+def _pip_cmd(package: str) -> str:
+    """装包命令 —— 用**当前解释器**的 pip。
+
+    裸 ``pip`` 可能指向别的 Python（这台机器上 PATH 的 pip 是 WorkBuddy 的），
+    照着装，Oryx 这边照样缺。
+    """
+    import sys
+
+    return f'"{sys.executable}" -m pip install {package}'
+
+
 def available() -> bool:
     try:
         import rapidocr_onnxruntime  # noqa: F401
@@ -76,7 +87,7 @@ def ocr_image(path: str | Path) -> dict[str, Any]:
             "ok": False,
             "text": "",
             "lines": [],
-            "error": "未安装 OCR 引擎。安装命令：pip install rapidocr-onnxruntime",
+            "error": "未安装 OCR 引擎。安装命令：" + _pip_cmd("rapidocr-onnxruntime"),
         }
 
     started = time.time()

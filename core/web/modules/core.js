@@ -57,6 +57,67 @@ export const esc = t => { const d = document.createElement('div'); d.textContent
  *
  *  数组原样返回（`data` 本身可能是数组，不能再往下剥一层）。
  */
+/* ── 默认权限（记住的那一档） ──────────────────────────────────
+   放在 core.js 是因为：models.js 和 policy.js 都要用它，
+   而这两个模块**互相 import** —— 再加一层就成了循环依赖。
+   core.js 不依赖任何模块，放这儿最安全。
+
+   为什么单独记一份
+   ----------------
+   单轮的 S.policy 发完消息就清掉了；「默认权限」得**一直管着后面的每一轮**。
+   这是个纯偏好，不必上后端，localStorage 足够。 */
+export const DEFAULT_POLICY_KEY = 'oryx-default-policy';
+
+/** 记住的默认权限档（空 = 跟随交互模式）。 */
+export function getDefaultPolicy() {
+  try {
+    return localStorage.getItem(DEFAULT_POLICY_KEY) || '';
+  } catch (_) {
+    return '';
+  }
+}
+
+/** 记住默认权限档。传空串 = 清掉记忆，回到「跟随交互模式」。 */
+export function setDefaultPolicy(key) {
+  const v = key || '';
+  try {
+    if (v) localStorage.setItem(DEFAULT_POLICY_KEY, v);
+    else localStorage.removeItem(DEFAULT_POLICY_KEY);
+  } catch (_) { /* 存不住也不影响本次 */ }
+  return v;
+}
+
+/** 从错误响应里取出**人能看懂**的原因。
+ *
+ * 错误响应有好几种形状：
+ *   · v2 规范   {code, data, message, detail}
+ *   · 老接口     {content: "..."}
+ *   · 纯文本     "xxx"
+ *
+ * 以前各处只读 `content` —— v2 接口出错时那个字段**压根不存在**，
+ * 于是所有失败都显示成一句没信息量的「执行失败」，
+ * 用户既不知道哪儿错了，也不知道该改什么。
+ *
+ * 这里把几种形状都认上。
+ */
+export function errText(body, fallback) {
+  const fb = fallback || '未知错误';
+  if (body === null || body === undefined) return fb;
+  if (typeof body === 'string') return body.trim().slice(0, 200) || fb;
+  if (typeof body !== 'object') return String(body).slice(0, 200) || fb;
+  const msg = body.detail || body.message || body.content || body.error || body.reason || '';
+  return String(msg).trim().slice(0, 200) || fb;
+}
+
+/** 错误响应 + 兜底文案，拼成一句能直接给用户看的话。 */
+export function errOf(resp, fallback) {
+  return resp.text().then(t => {
+    let body = t;
+    try { body = JSON.parse(t); } catch (_) { /* 纯文本 */ }
+    return errText(body, fallback);
+  }).catch(() => fallback || '未知错误');
+}
+
 export const dataOf = j => {
   if (!j || typeof j !== 'object' || Array.isArray(j)) return j;
   return ('data' in j) ? j.data : j;
@@ -193,6 +254,10 @@ export function md(src) {
 
 export const S = {
   view: 'chat', sessions: [], current: null, steps: new Map(), todos: [],
+  // 对话里那条任务栏是不是展开着（默认收起，只占一行）
+  todoPanelOpen: false,
+  // 当前会话挂着的团队（名字）。每个对话可以有自己的团队。
+  sessionTeam: '',
   artifacts: [], busy: false, term: null, assistant: null, scene: 'office',
   scenePreset: 'chat',   // 输入框顶部的场景预设
   interaction: 'craft', style: 'professional', expert: '', mode: 'efficiency', provider: '',
