@@ -58,23 +58,37 @@ def dir_size(p: Path) -> int:
     return total
 
 
-def copy_verified(src: Path, dst: Path) -> bool:
-    """复制并校验大小。返回是否成功。"""
+def copy_verified(src: Path, dst: Path, timeout: int = 600) -> tuple[bool, str]:
+    """复制并校验大小。返回 (够不够, 说明)。
+
+    **为什么要超时**
+    --------------
+    目标目录正被程序使用（DSH 一直在写 profiles），robocopy 会在被锁的文件上
+    反复重试 —— 实测拷 1.5GB 卡了 16 分钟只多拷了 5MB。
+
+    所以给一个上限：拷不完就停，**剩下的等 --finish 时再补一轮**
+    （那时程序已经关掉，没有锁，增量补齐很快）。
+    """
     if not src.exists():
-        return True
+        return True, "源不存在"
     dst.mkdir(parents=True, exist_ok=True)
     before = dir_size(src)
-    # robocopy 比 shutil 稳（断点续传、属性保留），Windows 上也有
-    subprocess.run(
-        ["robocopy", str(src), str(dst), "/E", "/NFL", "/NDL", "/NJH", "/NJS",
-         "/NP", "/R:1", "/W:1"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-    )
+    try:
+        subprocess.run(
+            ["robocopy", str(src), str(dst), "/E", "/NFL", "/NDL", "/NJH", "/NJS",
+             "/NP", "/R:1", "/W:1"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            timeout=timeout,
+        )
+        done = True
+    except subprocess.TimeoutExpired:
+        done = False
     after = dir_size(dst)
     ok = after >= before * 0.98
+    note = "" if done else "（超时中断，剩下的等 --finish 补齐）"
     print(f"    复制 {before/1024/1024:>8.1f} MB → D {after/1024/1024:>8.1f} MB"
-          f"  {'✓' if ok else '✗ 校验不过'}")
-    return ok
+          f"  {'✓' if ok else '… 还没拷完'}{note}")
+    return ok, ("ok" if ok else "partial")
 
 
 def make_junction(link: Path, target: Path) -> bool:
@@ -100,8 +114,9 @@ def do_move() -> None:
             print("    源不存在，跳过")
             state[name] = {"src": str(src), "dst": str(dst), "done": True}
             continue
-        ok = copy_verified(src, dst)
-        state[name] = {"src": str(src), "dst": str(dst), "copied": ok, "done": False}
+        ok, how = copy_verified(src, dst)
+        state[name] = {"src": str(src), "dst": str(dst), "copied": ok,
+                       "how": how, "done": False}
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), "utf-8")
     print(f"\n状态记在 {STATE_FILE}")
@@ -126,6 +141,8 @@ def do_finish() -> None:
             print("    D 盘还没有数据，先跑 --move")
             pending.append(name)
             continue
+        # 换目录前再补一轮 —— 程序已经关掉，这一轮没有锁，增量补齐很快
+        copy_verified(src, dst, timeout=900)
         # ① 源改名（腾出联接的位置）
         parked = src.with_name(src.name + ".moving")
         try:
