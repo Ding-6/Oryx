@@ -45,6 +45,24 @@ export function setView(v) {
   });
   // 子项跟着高亮：进入知识库时「知识库」也点亮
   $$('#localSub .subitem').forEach(b => b.classList.toggle('on', v === 'local' && b.dataset.lv === S.localView));
+  // 顶栏的视图 tab 跟着当前页面走。
+  //
+  // 以前**只有点顶栏 tab 才会点亮它** —— 从左栏切页面时顶栏纹丝不动，
+  // 于是顶栏还亮着「对话」，人其实已经在工作流页上了，分不清自己在哪。
+  //
+  // 映射不是一对一的：
+  //   知识库 → 左栏「本地资料」下的知识库子项（view 是 local）
+  //   插件   → 左栏「技能广场」（view 是 market）
+  // 键是 tab 上的 data-vt，值是它对应的 view。
+  const VT_VIEW = { chat: 'chat', workflows: 'workflows', kb: 'local', plugins: 'market' };
+  $$('#viewTabs .vtab').forEach(x => {
+    const target = VT_VIEW[x.dataset.vt];
+    const on = x.dataset.vt === 'kb'
+      ? (v === 'local' && S.localView === 'kb')
+      : (v === target);
+    x.classList.toggle('on', on);
+    x.setAttribute('aria-selected', String(on));
+  });
   const chat = v === 'chat';
   $('#center').style.display = chat ? 'flex' : 'none';
   $('#side').style.display = chat ? 'flex' : 'none';

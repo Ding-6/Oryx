@@ -129,7 +129,13 @@ class Response(BaseModel, Generic[T]):
 | 方法 | 路径 | 入参 | 出参 | 错误 | 前端用 |
 |---|---|---|---|---|---|
 | GET | `/api/prewarm` | — | `warming` `pending` `port` | 500 | **否** |
-| GET | `/api/state` | — | `mode` `interaction` `style` `styles[]` `expert` `experts[]` `provider` `model` `provider_is_local` `busy` `skills[]` | 内部异常降级为空字段 + 发 `agent.error`；未预期 → 500 | 是 |
+| GET | `/api/state` | — | `mode` `interaction` `style` `styles[]` `expert` `experts[]` `provider` `model` `provider_is_local` `busy` `skills[]` **`kernel_ready`** | 内部异常降级为空字段 + 发 `agent.error`；未预期 → 500 | 是 |
+
+> **`kernel_ready`**：Agent 内核起没起来（true/false）。
+> 内核没就绪时，走 RPC 的接口（团队、工作流…）会返回 **503**；
+> 前端靠这个字段决定**先别调**那些接口 —— 否则首屏控制台就是一排 503，
+> 用户以为页面坏了，实际只是内核还在启动。
+> 详见 §0.2。
 | GET | `/api/audit/{task_id}` | path: `task_id: str` | `task_id` `audit[]`（键 `id ts task_id step_id tool args risk decision outcome mutated`） | 500；查不到 → `audit: []` | 是 |
 | GET | `/api/usage` | q: `hours: int=720` | `window_hours` `total{calls,input_tokens,output_tokens}` `today{…}` `by_model[]{provider,model,calls,inp,outp}` | 500 | 是 |
 | GET | `/api/tasks` | — | `tasks[]`（键 `id goal mode provider status created_at updated_at title`） | 500 | **否** |
