@@ -50,6 +50,12 @@ class AgentLink:
         self._config_provider = config_provider
         # 配置同步的重入守卫（_sync_config 内部要发 RPC）
         self._syncing = False
+        # 上次推给内核的配置 mtime。
+        #
+        # 自己记账的原因见 _sync_config 的说明：
+        # Config.refresh() 的「变了没」信号会被 save() 和 HTTP 中间件先消费掉，
+        # 不能拿来当判据。
+        self._synced_mtime: float | None = None
         self._proc: subprocess.Popen | None = None
         self._client: IpcClient | None = None
         self._port_file: Path | None = None
@@ -351,8 +357,20 @@ class AgentLink:
         用户在设置页新增/切换 provider 后，server 侧的配置立刻生效，
         内核却还在按启动时那份跑 —— 表现是"明明配好了却报未知 provider"。
 
-        每次调用都探一次磁盘 mtime（stat 很便宜，没变就直接返回），
-        变了才让内核重读。内核侧的 refresh 只在真需要时付出解析代价。
+        **不能拿 `config.refresh()` 的返回值当判据**
+        ----------------------------------------
+        那个「配置变了没」的信号会被别人先消费掉：
+
+          · `Config.save()` 写完文件顺手更新了 `_mtime`
+          · HTTP 中间件每个请求开头都调 `config.refresh()`
+
+        等这里再去问，mtime 早就一致了 → `refresh()` 返回 False →
+        **内核永远收不到重载通知**。
+        实测症状：用户在设置里填好 api_key，聊天仍报
+        「provider [minimax] 缺少 api_key」—— 内核一直拿着启动时那份配置。
+
+        所以这里**自己记账**：跟「上次推给内核的那个 mtime」比，
+        而不是跟 Config 的内部状态比。
         """
         if self._config_provider is None or self._syncing:
             return   # _syncing 守卫：下面要发 RPC，不能又递归回自己
@@ -360,15 +378,33 @@ class AgentLink:
             cfg = self._config_provider()
         except Exception:
             return
-        refresh = getattr(cfg, "refresh", None)
-        if not callable(refresh):
-            return
-        try:
-            changed = refresh()
-        except Exception:
-            return
-        if not changed:
-            return
+
+        mtime = getattr(cfg, "disk_mtime", None)
+        if mtime is None:
+            # 拿不到 mtime（配置没落盘）→ 退回老判据
+            refresh = getattr(cfg, "refresh", None)
+            if not callable(refresh):
+                return
+            try:
+                changed = refresh()
+            except Exception:
+                return
+            if not changed:
+                return
+        else:
+            if (
+                self._synced_mtime is not None
+                and abs(mtime - self._synced_mtime) < 1e-6
+            ):
+                return
+            # 让控制面自己先刷到最新 —— 推给内核的 allowed_roots 等才是新的
+            refresh = getattr(cfg, "refresh", None)
+            if callable(refresh):
+                try:
+                    refresh()
+                except Exception:
+                    pass
+
         self._syncing = True
         try:
             self.call("runtime.config_reload", timeout=10.0)
@@ -378,6 +414,8 @@ class AgentLink:
             pass
         finally:
             self._syncing = False
+            if mtime is not None:
+                self._synced_mtime = mtime
 
     # ---------------------------------------------------------------- 崩溃现场
 

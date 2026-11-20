@@ -469,6 +469,31 @@ class Config:
 
     # ---- 便捷访问 ----
     @property
+    def disk_mtime(self) -> float | None:
+        """磁盘上配置文件当前的 mtime（**不**动内存状态）。
+
+        为什么需要它
+        ------------
+        `refresh()` 的返回值（「配置变了没」）**不能**用来判断要不要通知内核：
+        这个信号会被**别人先消费掉** ——
+          · `save()` 自己写完文件就更新了 `_mtime`
+          · HTTP 中间件每个请求开头都调 `config.refresh()`
+
+        等 AgentLink 想去同步内核时，mtime 早就一致了 → `refresh()` 返回 False
+        → **内核永远收不到「配置变了」**。
+        表现就是：用户在设置里填好 api_key，聊天仍报「缺少 api_key」
+        —— 内核一直拿着启动时那份配置在跑。
+
+        所以内核同步要自己记账：拿这个 mtime 跟「上次推给内核的那个」比。
+        """
+        if self.path is None:
+            return None
+        try:
+            return self.path.stat().st_mtime
+        except OSError:
+            return None
+
+    @property
     def mode(self) -> str:
         return self.data.get("mode", "efficiency")
 
