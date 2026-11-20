@@ -59,6 +59,22 @@ class RenameRequest(BaseModel):
     title: str | None = None
     team: str | None = None
 
+    def given(self, name: str) -> bool:
+        """这个字段在请求体里**出现过**吗？
+
+        为什么不能只看「值是不是 None」
+        ------------------------------
+        三种语义要共存：
+          · ``{title: "新名"}``  → 改名
+          · ``{title: ""}``      → 清空自定义名字（前端清空时传的就是空串）
+          · ``{team: "甲组"}``   → 只挂团队，**名字一个字都不许动**
+          · ``{}``               → 老约定：清空名字
+
+        「只挂团队」和「空 body」光看值分不开（都是 title=None）——
+        所以要看字段**有没有出现**。
+        """
+        return name in self.model_fields_set
+
     @field_validator("title", mode="before")
     @classmethod
     def _null_to_empty(cls, value):
@@ -217,7 +233,7 @@ def rename_session(store: Store, task_id: str, title: str) -> dict:
     return {"renamed": task_id, "title": (title or "").strip()}
 
 
-def update_session(store: Store, task_id: str, title: str | None, team: str | None) -> dict:
+def update_session(store: Store, task_id: str, req: RenameRequest) -> dict:
     """改会话：名字 + 挂的团队，可以只改其中一个。
 
     **为什么合并成一个接口**
@@ -225,13 +241,28 @@ def update_session(store: Store, task_id: str, title: str | None, team: str | No
     「改名」和「挂团队」都是改同一行 tasks 的属性，
     分成两个接口就得发两次请求，还容易出现「改了名但团队没跟上」的中间态。
 
-    `title` / `team` 传 None = 那项不动；传空串 = 撤掉。
+    **三种语义共存**（靠「字段有没有出现」区分，不是靠值）
+    --------------------------------------------------
+        {title: "新名"}  → 改名
+        {title: ""}      → 清空自定义名字（前端清空时传的就是空串）
+        {team: "甲组"}   → 只挂团队，**名字一个字都不许动**
+        {}               → 老约定：清空名字
+
+    「只挂团队」和「空 body」光看值分不开（都是 title=None），
+    所以要看字段**在不在请求体里**（`model_fields_set`）。
     """
-    if title is not None:
-        if not store.rename_session(task_id, title):
+    # 名字：显式给了就改；只给了 team 就不动；什么都没给按老约定清空。
+    if req.given("title"):
+        want_title = req.title or ""
+    elif req.given("team"):
+        want_title = None          # 只挂团队 —— 名字一个字都不动
+    else:
+        want_title = ""            # 空 body = 撤掉自定义名字（老语义）
+    if want_title is not None:
+        if not store.rename_session(task_id, want_title):
             raise HTTPException(404, "没有这个会话")
-    if team is not None:
-        if not store.set_session_team(task_id, team):
+    if req.given("team"):
+        if not store.set_session_team(task_id, req.team or ""):
             raise HTTPException(404, "没有这个会话")
     # 返回**改完之后**的实际值 —— 只改名字时 team 也得报当前挂着的那一个，
     # 否则前端会把「没动过的团队」显示成空（刚挂上的团队会凭空消失）。
@@ -240,6 +271,12 @@ def update_session(store: Store, task_id: str, title: str | None, team: str | No
         "task_id": task_id,
         "title": str(detail.get("title") or ""),
         "team": store.session_team(task_id),
+        # `renamed` 是老字段 —— 保留着。
+        # 以前这个接口只管改名，返回体是 {renamed, title}；
+        # 现在它还管挂团队，返回体扩成了三个字段。
+        # 直接把老字段删掉会**静默破坏**调用方（它读 renamed 拿到 undefined），
+        # 所以留着（新代码用 task_id/title/team 就行）。
+        "renamed": task_id,
     }
 
 
@@ -263,7 +300,7 @@ def register(app, store: Store) -> None:
 
     @router.put("/{task_id}")
     async def _rename(task_id: str, req: RenameRequest):
-        return ok(update_session(store, task_id, req.title, req.team))
+        return ok(update_session(store, task_id, req))
 
     @router.put("/{task_id}/todos/{todo_id}")
     async def _update_todo(task_id: str, todo_id: str, req: TodoStatusRequest):

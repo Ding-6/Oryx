@@ -1732,6 +1732,32 @@ export async function teamForm({ id = '', name = '', goal = '', members = [] } =
  *   · 挂着的对话，agent 知道该派给谁；
  *   · 换对话时自动带上/摘掉对应团队。
  */
+/* 团队总览条：目标 + 成员进度 + 当前状态。
+ *
+ * 以前面板一打开就是「成员与分工」列表，用户得自己数人头、
+ * 自己判断谁干完了 —— 团队是有状态的东西，该有个总览。
+ */
+function _teamOverview(t) {
+  const members = t.members || [];
+  const busy = members.filter(m => S.teamBusy.has(t.name + '/' + m.agent_id)).length;
+  const noRole = members.filter(m => !m.role).length;
+  const msgs = (t.thread || []).length;
+  return `<div class="teamovw">
+    <div class="tov-row">
+      <span class="tov-k">目标</span>
+      <span class="tov-v">${t.goal ? esc(t.goal) : '<span class="mrnone">还没定目标</span>'}</span>
+    </div>
+    <div class="tov-row">
+      <span class="tov-k">成员</span>
+      <span class="tov-v">${members.length} 人${noRole ? ` · <b style="color:var(--warn)">${noRole} 个没分工</b>` : ' · 分工已明确'}${busy ? ` · ${busy} 个执行中` : ''}</span>
+    </div>
+    <div class="tov-row">
+      <span class="tov-k">协作</span>
+      <span class="tov-v">${msgs} 条记录</span>
+    </div>
+  </div>`;
+}
+
 function _sessionTeamRow(teamName) {
   const cur = S.sessionTeam || '';
   const on = cur === teamName;
@@ -1763,15 +1789,17 @@ async function openTeamPanel(teamName) {
             ${allTeams.map(x => `<option value="${escAttr(x.name)}" ${x.name === t.name ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}
           </select>
         </div>` : ''}
+        ${_teamOverview(t)}
         ${_sessionTeamRow(t.name)}
-        ${t.goal ? `<div class="teamcard" style="margin-bottom:14px"><div class="tgoal" style="margin:0">${esc(t.goal)}</div></div>` : ''}
         <div class="sect" style="margin-bottom:16px"><h2>成员与分工</h2>
           <div id="tpMembers">${(t.members || []).map(m => `
             <div class="member">
               <span class="mk">${esc(S.agentIcons[m.agent_id] || (m.agent_id || '?').slice(0, 1).toUpperCase())}</span>
               <span class="mn">${esc(cnAgent(m.agent_id))}</span>
-              ${S.agentSubs[m.agent_id] ? `<span class="msub" title="该 Agent 的职责">${esc(S.agentSubs[m.agent_id])}</span>` : ''}
-              <span class="mr">${esc(m.role || '')}</span>
+              <span class="msubs">
+                ${S.agentSubs[m.agent_id] ? `<span class="msub" title="这个 Agent 的固有职责">本职：${esc(S.agentSubs[m.agent_id])}</span>` : ''}
+                <span class="mr${m.role ? ' has' : ''}" title="本轮分工">${m.role ? '本轮：' + esc(m.role) : '<span class="mrnone">未分工</span>'}</span>
+              </span>
               <span class="mstate ${S.teamBusy.has(t.name + '/' + m.agent_id) ? 'busy' : ''}">${S.teamBusy.has(t.name + '/' + m.agent_id) ? '执行中' : '就绪'}</span>
               <span class="mact">
                 <button class="btn" data-pmsg="${escAttr(m.agent_id)}" type="button">派活</button>
@@ -1794,7 +1822,8 @@ async function openTeamPanel(teamName) {
              <div class="spacer"></div>
              <button class="btn" data-close type="button">关闭</button>
              <button class="btn" id="tpEdit" type="button">编辑团队</button>
-             <button class="btn primary" id="tpAuto" type="button">按顺序跑完全部成员</button>`,
+             <button class="btn" id="tpParallel" type="button">并行开跑</button>
+             <button class="btn primary" id="tpAuto" type="button">按顺序跑完</button>`,
     });
     // 挂到当前对话 / 摘掉
     const attach = $('#tpAttach');
@@ -1939,25 +1968,52 @@ async function openTeamPanel(teamName) {
         try { t = await (await api(`/api/teams/${encodeURIComponent(t.name)}`)).json(); } catch (_) {}
         paint(); loadTeams(); toast(agent + ' 已加入');
       });
+      /* 派一个成员干活：先投递简报，再让它开工。
+       *
+       * 简报里带上分工 —— 成员才知道自己这一轮干什么。
+       */
+      const runMember = async (m) => {
+        const key = t.name + '/' + m.agent_id;
+        if (S.teamBusy.has(key)) return null;
+        S.teamBusy.add(key);
+        const c = (t.members || []).find(x => x.agent_id === m.agent_id);
+        const brief = (t.goal || '按你的分工完成这一轮任务') + (c && c.role ? `（分工：${c.role}）` : '');
+        await api(`/api/teams/${encodeURIComponent(t.name)}/message`, {
+          method: 'POST', body: JSON.stringify({ to: m.agent_id, content: brief }),
+        });
+        const r = await api(`/api/teams/${encodeURIComponent(t.name)}/dispatch`, {
+          method: 'POST', body: JSON.stringify({ agent: m.agent_id }),
+        });
+        S.teamBusy.delete(key);
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          return cnAgent(m.agent_id) + ' 失败：' + errText(e, '没有说明原因');
+        }
+        return null;
+      };
+
+      // 按顺序：一个接一个跑（后面的依赖前面的产出）
       $('#tpAuto').addEventListener('click', async () => {
         for (const m of (t.members || []).slice()) {
-          const key = t.name + '/' + m.agent_id;
-          if (S.teamBusy.has(key)) continue;
-          S.teamBusy.add(key);
           toast('派活给 ' + cnAgent(m.agent_id) + '…');
-          const c = (t.members || []).find(x => x.agent_id === m.agent_id);
-          // 简报里带上分工 —— 成员才知道自己这一轮干什么
-          const brief = (t.goal || '按你的分工完成这一轮任务') + (c && c.role ? `（分工：${c.role}）` : '');
-          await api(`/api/teams/${encodeURIComponent(t.name)}/message`, { method: 'POST', body: JSON.stringify({ to: m.agent_id, content: brief }) });
-          const r = await api(`/api/teams/${encodeURIComponent(t.name)}/dispatch`, { method: 'POST', body: JSON.stringify({ agent: m.agent_id }) });
-          S.teamBusy.delete(key);
-          if (!r.ok) {
-            const e = await r.json().catch(() => ({}));
-            toast(cnAgent(m.agent_id) + ' 失败：' + errText(e, '没有说明原因'));
-          }
+          const err = await runMember(m);
+          if (err) toast(err);
         }
         try { t = await (await api(`/api/teams/${encodeURIComponent(t.name)}`)).json(); } catch (_) {}
         paint(); loadTeams(); toast('团队跑完一轮');
+      });
+
+      // 并行：全部成员同时开跑 —— 互不依赖的活不用排队等。
+      // 团队协作最常见的形态就是「各查各的，最后汇总」。
+      $('#tpParallel').addEventListener('click', async () => {
+        const list = (t.members || []).slice();
+        if (!list.length) { toast('团队里还没人'); return; }
+        toast('并行派活给 ' + list.length + ' 个成员…');
+        const errs = (await Promise.all(list.map(m => runMember(m)))).filter(Boolean);
+        try { t = await (await api(`/api/teams/${encodeURIComponent(t.name)}`)).json(); } catch (_) {}
+        paint(); loadTeams();
+        if (errs.length) errs.forEach(e => toast(e));
+        else toast('并行跑完一轮');
       });
     };
     bind();
@@ -2637,6 +2693,7 @@ export async function renderMarket() {
       <button class="btn" id="mkImport" type="button">批量导入</button>
       ${S.marketTab === 'skills' ? '<button class="btn primary" id="mkAdd" type="button">新建技能</button>' : ''}
       ${S.marketTab === 'experts' ? '<button class="btn primary" id="mkAddEx" type="button">新建人设</button>' : ''}
+      ${S.marketTab === 'tools' ? '<button class="btn primary" id="mkAddPackTop" type="button">新建工具包</button>' : ''}
     </div>
     <div id="mkBody"></div>`);
   $$('#page [data-mtab]').forEach(b => b.addEventListener('click', () => { S.marketTab = b.dataset.mtab; renderMarket(); }));
@@ -2891,7 +2948,11 @@ export async function renderMarket() {
       <div class="sect"><h2>内置工具集 · ${caps.groups.length} 套</h2>
       <div class="grid ucgrid" id="mkToolGrid"></div></div>`;
     const grid = $('#mkToolGrid');
+    // 两个「新建工具包」按钮（页签工具条上 + 工具集那一行）都开同一个表单。
+    // 它们的 id 必须不同 —— 同名的话 querySelector 只会取到第一个，
+    // 另一个就变成点了没反应的死按钮。
     $('#mkAddPack')?.addEventListener('click', () => editToolPack(null, caps.groups));
+    $('#mkAddPackTop')?.addEventListener('click', () => editToolPack(null, caps.groups));
     $('#mkImportPack')?.addEventListener('click', importToolPack);
     if (packs.length) {
       bindUCards($('#mkPackGrid'), (act, data) => {

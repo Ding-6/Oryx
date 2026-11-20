@@ -495,3 +495,48 @@
   .todopanel .todo { margin-bottom:4px; }
   .todopanel .tpadd { display:flex; gap:6px; margin-top:8px; }
   .todopanel .tpadd .inp { flex:1 1 auto; min-width:0; }
+
+  /* ── 团队总览条 ────────────────────────────────────────────────
+     团队是有状态的东西（谁在忙、谁没分工），
+     以前面板一打开就是一列成员，用户得自己数人头、自己判断。
+     ──────────────────────────────────────────────────────────── */
+  .teamovw {
+    border:1px solid var(--line);
+    border-radius:12px;
+    background:var(--card);
+    padding:10px 14px;
+    margin-bottom:14px;
+  }
+  .teamovw .tov-row {
+    display:flex; align-items:baseline; gap:10px;
+    padding:3px 0;
+  }
+  .teamovw .tov-k {
+    flex:0 0 40px;
+    font-size:11.5px; color:var(--muted);
+  }
+  .teamovw .tov-v {
+    flex:1 1 auto; min-width:0;
+    font-size:12.5px; color:var(--ink-2);
+    line-height:1.6;
+  }
+
+  /* ── 成员卡片：把「本职」和「本轮分工」分成两栏 ────────────────
+     以前两者挤在一行（本职的 Agent 职责 + 本轮分工），
+     哪个是哪个分不清 —— 而「本轮分工」才是这次协作的关键。
+     ──────────────────────────────────────────────────────────── */
+  .member .msubs {
+    flex:1 1 auto; min-width:0;
+    display:flex; flex-direction:column; gap:2px;
+  }
+  .member .msub {
+    font-size:11.5px; color:var(--muted);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .member .mr {
+    font-size:12px; color:var(--muted);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  /* 本轮分工 —— 有内容才上色，没内容别占地方 */
+  .member .mr.has { color:var(--accent); font-weight:600; }
+  .member .mrnone { color:var(--muted); opacity:.7; font-weight:400; }

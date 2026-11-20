@@ -176,7 +176,8 @@ class Response(BaseModel, Generic[T]):
 | GET | `/api/sessions` | q: `limit: int=50`（上限 200） | **数组** `Session[]`（键 `id goal title status mode provider created_at updated_at msg_count step_count todo_open renamed`） | — | 是 |
 | GET | `/api/sessions/{task_id}` | path: `task_id: str` | **对象** `{task, title, messages[], steps[], todos[], usage{calls,input_tokens,output_tokens}}` | 404「没有这个会话」 | 是 |
 | DELETE | `/api/sessions/{task_id}` | path | **对象** `{deleted}` | 404「没有这个会话」 | 是 |
-| PUT | `/api/sessions/{task_id}` | body: `RenameRequest{title: str=""}`（null 归一成空串） | **对象** `{renamed, title}` | 404「没有这个会话」；422（title 不是字符串） | 是 |
+| PUT | `/api/sessions/{task_id}` | body: `RenameRequest{title: str\|null=null, team: str\|null=null}` | **对象** `{task_id, title, team, renamed}`（**改完之后**的实际值） | 404「没有这个会话」；422 | 是 |
+| POST | `/api/sessions/{task_id}/todos` | body: `TodoCreateRequest{title: str="", status: str="pending"}` | **对象** `{id, title, status, seq}` | **400**「待办得有个标题」/「标题太长了」/「status 只能是…」；**404**「没有这个会话」；422 | 是 |
 | PUT | `/api/sessions/{task_id}/todos/{todo_id}` | path ×2；body: `TodoStatusRequest{status: str}` | **对象** `{updated, todo}` | **400**「status 只能是 pending / in_progress / done」；404「没有这个待办」；422（缺 status / 类型不对） | 是 |
 | GET | `/api/sessions/{task_id}/steps` | path | **数组** `Step[]` | — | **否** |
 | GET | `/api/sessions/{task_id}/todos` | path | **数组** `Todo[]` | — | **否** |
@@ -363,6 +364,15 @@ class Response(BaseModel, Generic[T]):
 | POST | `/api/tool-packs/import` | body: 插件清单（`oryx.json`） | 新建的工具包 | **400**「清单里没有名字」/「一个工具都没有」/「这是 kind=X 的插件，不是工具包」；409 | 是 |
 
 **要点**
+- **每个会话可以挂一个自己的团队**：`tasks.team` 列（用 `_ensure_columns` 幂等补列）。
+  团队是全局的，会话是私人的 —— 靠这一列把两者挂起来。
+  `PUT /api/sessions/{task_id}` 的 `team` 传 None = 不动它，传空串 = 摘掉。
+  改名和挂团队合并在同一个 PUT 里（改的是同一行 `tasks` 的属性）。
+  **三种语义共存**（靠「字段有没有出现」区分，不是靠值）：
+  `{title:"新名"}` 改名 · `{title:""}` 清空名字 ·
+  `{team:"甲组"}` 只挂团队（名字一个字都不动）· `{}` 老约定=清空名字。
+- `renamed` 是**老字段，保留着** —— 这个接口以前只管改名，返回体是
+  `{renamed, title}`。直接删掉会**静默破坏**读它的调用方（拿到 undefined）。
 - 存在配置里（`config.data["tool_packs"]`），跟着应用数据走。
   不落成磁盘插件包：那些是**带实现**的扩展（要写代码），
   这里的工具包只是**对现有工具的分组与说明**。
