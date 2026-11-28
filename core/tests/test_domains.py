@@ -136,16 +136,18 @@ def skill_root(tmp_path, monkeypatch):
 
 def test_skill_crud(skill_root):
     agent = FakeAgent()
-    assert skill.create_skill(agent, {"name": "demo", "description": "说明", "body": "内容"}) == {
-        "created": "demo"
-    }
+    assert skill.create_skill(agent, skill.SkillCreateRequest(
+        name="demo", description="说明", body="内容")) == {"created": "demo"}
     assert any(s["name"] == "demo" for s in skill.list_skills(agent)["skills"])
 
     detail = skill.read_skill(agent, "demo")
     assert detail["description"] == "说明"
 
-    assert skill.update_skill(agent, "demo", {"description": "新说明"})["updated"] == "demo"
+    # 只传 description：body 必须沿用旧值（exclude_unset 语义）
+    assert skill.update_skill(agent, "demo", skill.SkillUpdateRequest(
+        description="新说明"))["updated"] == "demo"
     assert skill.read_skill(agent, "demo")["description"] == "新说明"
+    assert skill.read_skill(agent, "demo")["body"].strip() == "内容"
 
     assert skill.delete_skill(agent, "demo") == {"deleted": "demo"}
     assert not any(s["name"] == "demo" for s in skill.list_skills(agent)["skills"])
@@ -154,7 +156,7 @@ def test_skill_crud(skill_root):
 def test_skill_write_triggers_kernel_reload(skill_root):
     """写完技能要通知内核重扫，否则新技能不会立刻出现在对话里。"""
     agent = FakeAgent()
-    skill.create_skill(agent, {"name": "demo", "body": "x"})
+    skill.create_skill(agent, skill.SkillCreateRequest(name="demo", body="x"))
     assert any(m == "catalog.reload" for m, _ in agent.calls)
 
 
@@ -162,7 +164,7 @@ def test_skill_name_rejects_path_traversal(skill_root):
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException) as exc:
-        skill.create_skill(FakeAgent(), {"name": "../escape", "body": "x"})
+        skill.create_skill(FakeAgent(), skill.SkillCreateRequest(name="../escape", body="x"))
     assert exc.value.status_code == 400
 
 
@@ -170,9 +172,9 @@ def test_skill_create_rejects_duplicate(skill_root):
     from fastapi import HTTPException
 
     agent = FakeAgent()
-    skill.create_skill(agent, {"name": "demo", "body": "x"})
+    skill.create_skill(agent, skill.SkillCreateRequest(name="demo", body="x"))
     with pytest.raises(HTTPException) as exc:
-        skill.create_skill(agent, {"name": "demo", "body": "x"})
+        skill.create_skill(agent, skill.SkillCreateRequest(name="demo", body="x"))
     assert exc.value.status_code == 409
 
 
@@ -191,8 +193,10 @@ def test_schedule_actions_rpc():
 
 
 def test_schedule_run_terminal_forwards_to_kernel():
+    # 模块 10：`/api/terminal/run` 换成 Pydantic 契约后，域函数也收模型，
+    # 与 workflow.run_workflow(..., WorkflowRunRequest) 的惯例一致。
     agent = FakeAgent()
-    out = schedule.run_terminal(agent, {"command": "echo hi"})
+    out = schedule.run_terminal(agent, schedule.TerminalRunRequest(command="echo hi"))
     assert out["id"] == "t1"
     assert "已启动" in out["status"]
     assert ("terminal.run", {"command": "echo hi", "cwd": ""}) in agent.calls
@@ -202,7 +206,7 @@ def test_schedule_rejects_empty_command():
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException) as exc:
-        schedule.run_terminal(FakeAgent(), {"command": "  "})
+        schedule.run_terminal(FakeAgent(), schedule.TerminalRunRequest(command="  "))
     assert exc.value.status_code == 400
 
 
@@ -292,7 +296,7 @@ def test_workflow_delete_missing_raises_404():
 EXPECTED_DOMAINS = [
     "session", "model_config", "skill", "schedule", "checkpoint", "workflow",
     "appearance", "feature", "memory", "remote", "ui", "extension",
-    "tools", "toolpack", "mcp", "file", "persona", "team", "index",
+    "tools", "toolpack", "mcp", "file", "persona", "team", "index", "knowledge",
     "preference", "chat", "app", "system",
     "overview",
 ]
@@ -302,7 +306,7 @@ EXPECTED_PREFIXES = {
     "/api/appearance", "/api/features", "/api/memory", "/api/remote",
     "/api/ui", "/api/extensions", "/api/ui-extensions",
     "/api/tools", "/api/mcp", "/api/files", "/api/workspace", "/api/doc",
-    "/api/teams", "/api/overview", "/api/tool-packs",
+    "/api/teams", "/api/overview", "/api/tool-packs", "/api/knowledge",
     # persona 域管**多个**前缀（/api/persona、/api/expert、/api/experts、
     # /api/agents），index 域也是（/api/index、/api/drives、/api/images）——
     # 所以它们的 router 用 `/api` 前缀 + tag 区分。
@@ -354,6 +358,7 @@ def test_key_paths_are_reachable():
         "/api/mcp", "/api/files/list", "/api/workspace", "/api/doc",
         "/api/persona", "/api/experts", "/api/agents",
         "/api/teams", "/api/index/status", "/api/drives", "/api/images",
+        "/api/knowledge/collections", "/api/knowledge/search",
         # 最后一批
         "/api/state", "/api/chat", "/api/apps", "/api/prewarm",
         "/api/doctor", "/api/fs/list", "/api/approve", "/api/interaction",
@@ -369,23 +374,34 @@ def test_server_exposes_domain_routes():
     用 TestClient 会触发 startup，从而真的把 Agent 内核进程拉起来 ——
     这正是要验证的：HTTP 层能通过 RPC 拿到 Agent 侧的数据。
     """
-    from oryx.server import API_TOKEN, app, agent
+    from oryx.server import API_TOKEN, app, agent, store
 
-    with TestClient(app) as client:
-        assert agent.alive, "startup 之后 Agent 内核进程应该活着"
-        headers = {"X-Oryx-Token": API_TOKEN}
-        for path in ("/api/sessions", "/api/providers", "/api/skills",
-                     "/api/automations", "/api/terminal", "/api/checkpoints/nope",
-                     "/api/workflows"):
-            assert client.get(path, headers=headers).status_code == 200, path
+    checkpoint_task_id = store.create_task(
+        "checkpoint route smoke test", "craft", "test-provider"
+    )
 
-        # 依赖 Agent 内核的两个域：要能真正取到数据，而不只是 200
-        caps = client.get("/api/capabilities", headers=headers)
-        assert caps.status_code == 200
-        assert caps.json()["total"] > 40
+    try:
+        with TestClient(app) as client:
+            assert agent.alive, "startup 之后 Agent 内核进程应该活着"
+            headers = {"X-Oryx-Token": API_TOKEN}
+            for path in ("/api/sessions", "/api/providers", "/api/skills",
+                         "/api/automations", "/api/terminal", "/api/workflows"):
+                assert client.get(path, headers=headers).status_code == 200, path
 
-        skills = client.get("/api/skills", headers=headers).json()
-        assert isinstance(skills["skills"], list)
+            checkpoint_path = f"/api/checkpoints/{checkpoint_task_id}"
+            checkpoint_response = client.get(checkpoint_path, headers=headers)
+            assert checkpoint_response.status_code == 200, checkpoint_path
+            assert checkpoint_response.json()["task_id"] == checkpoint_task_id
+
+            # 依赖 Agent 内核的两个域：要能真正取到数据，而不只是 200
+            caps = client.get("/api/capabilities", headers=headers)
+            assert caps.status_code == 200
+            assert caps.json()["total"] > 40
+
+            skills = client.get("/api/skills", headers=headers).json()
+            assert isinstance(skills["skills"], list)
+    finally:
+        store.delete_session(checkpoint_task_id)
 
 
 def test_server_session_rename_route(tmp_path):

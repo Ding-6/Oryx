@@ -93,6 +93,89 @@ def test_delete_after_approval_executes(tmp_path, monkeypatch):
     assert not victim.exists(), "确认后应当执行删除"
 
 
+def test_pending_approvals_snapshot_and_resolve_event(tmp_path, monkeypatch):
+    """页面刷新后靠内核快照重建审批卡；批准要广播，多端一起撤卡。"""
+    monkeypatch.setattr(loop_mod, "APPROVAL_TIMEOUT", 20)
+    victim = tmp_path / "trash.txt"
+    victim.write_text("可以删", encoding="utf-8")
+    runtime, store, bus, _ = make_runtime(
+        tmp_path, [("fs_delete", {"path": str(victim)}), (None, {})]
+    )
+    events = []
+    bus.add_sync_sink(events.append)
+    finished = threading.Event()
+
+    def work():
+        runtime.run("删掉那个文件")
+        finished.set()
+
+    threading.Thread(target=work, daemon=True).start()
+    items = []
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        items = runtime.pending_approvals()
+        if items:
+            break
+        time.sleep(0.02)
+    assert items, "等确认时内核里应该有一份可查询的审批"
+
+    item = items[0]
+    assert item["tool"] == "fs_delete"
+    assert item["plan"]["tool"] == "fs_delete"
+    assert item["plan"]["summary"]
+    assert item["plan"]["actions"][0]["target"] == str(victim)
+    task_id = item["task_id"]
+    # SSE 那一帧要和兜底接口是同一份内容 —— 否则两种入口显示的卡片不一样
+    waiting = [e for e in events if e["type"] == "step.awaiting_approval"]
+    assert len(waiting) == 1
+    assert waiting[0]["step_id"] == item["step_id"]
+    assert waiting[0]["task_id"] == task_id
+    assert waiting[0]["plan"] == item["plan"]
+    assert waiting[0]["risk"] == item["risk"]
+    assert waiting[0]["tool"] == item["tool"]
+    assert runtime.pending_approvals(task_id="别的会话") == []
+    assert runtime.pending_approvals(owner_id="别人") == []
+    assert len(runtime.pending_approvals(task_id=task_id)) == 1
+
+    assert runtime.resolve_approval(item["step_id"], True) is True
+    assert finished.wait(5), "批准后这一轮应继续执行并收尾"
+    assert runtime.pending_approvals() == []
+    resolved = [e for e in events if e["type"] == "step.approval_resolved"]
+    assert len(resolved) == 1
+    assert resolved[0]["step_id"] == item["step_id"]
+    assert resolved[0]["approved"] is True
+    assert not victim.exists(), "确认后应当执行删除"
+
+
+def test_pending_approvals_are_owner_scoped(tmp_path, monkeypatch):
+    """两个账号同时在等确认 —— 按 task / owner 过滤不能串。"""
+    monkeypatch.setattr(loop_mod, "APPROVAL_TIMEOUT", 20)
+    runtime, *_ = make_runtime(tmp_path, [(None, {})])
+    waiters = []
+
+    def wait(step, task, owner):
+        runtime.wait_approval(step, task_id=task, owner_id=owner, tool=step)
+
+    for step, task, owner in (("s1", "t1", "alice"), ("s2", "t2", "bob")):
+        t = threading.Thread(target=wait, args=(step, task, owner), daemon=True)
+        t.start()
+        waiters.append(t)
+    deadline = time.time() + 5
+    while len(runtime.pending_approvals()) < 2 and time.time() < deadline:
+        time.sleep(0.02)
+    assert len(runtime.pending_approvals()) == 2
+
+    try:
+        assert [i["step_id"] for i in runtime.pending_approvals(task_id="t1")] == ["s1"]
+        assert [i["step_id"] for i in runtime.pending_approvals(owner_id="bob")] == ["s2"]
+        assert runtime.pending_approvals(task_id="t1", owner_id="bob") == []
+    finally:
+        assert runtime.resolve_approval("s1", False) is True
+        assert runtime.resolve_approval("s2", False) is True
+        for t in waiters:
+            t.join(timeout=5)
+
+
 def test_forbidden_operation_is_rejected(tmp_path):
     secret = Path("C:/Windows/system.ini")
     runtime, store, bus, _ = make_runtime(

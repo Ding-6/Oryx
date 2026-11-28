@@ -173,7 +173,30 @@ class TestCancel:
         runtime.mark_run_pending()
         out = runtime.cancel()
         assert out["ok"] is True
-        assert runtime._cancel_event.is_set()
+        # 模块 11：中止信号改成**每个运行实例一份**，不再是全局 Event。
+        # 断言的是「目标实例的那一份被置位」。
+        assert runtime._only_run_abort().event.is_set()
+
+    def test_cancel_targets_task_and_owner(self, tmp_path):
+        """会话页停止按钮只能停止匹配当前会话和账号的运行。"""
+        runtime, store, *_ = make_runtime(tmp_path)
+        task_id = store.create_task(
+            "只停止自己的任务", "efficiency", "test", owner_id="alice"
+        )
+        runtime.mark_run_pending(task_id=task_id, owner_id="alice")
+
+        assert runtime.cancel(task_id="another-task", owner_id="alice")["ok"] is False
+        assert runtime.cancel(task_id=task_id, owner_id="bob")["ok"] is False
+        assert not runtime._only_run_abort().event.is_set(), (
+            "不匹配的停止请求不能触碰运行标志"
+        )
+
+        assert runtime.cancel(task_id=task_id, owner_id="alice")["ok"] is True
+        runtime.run(
+            "只停止自己的任务", session_id=task_id,
+            pending_slot=True, owner_id="alice",
+        )
+        assert store.get_task(task_id, "alice")["status"] == "cancelled"
 
     def test_run_stops_after_cancel(self, tmp_path):
         """点了停止，主循环就该在下一轮收手。"""
@@ -232,10 +255,13 @@ class TestCancel:
     def test_new_run_clears_cancel_flag(self, tmp_path):
         """上一轮留下的中止标志不能影响下一轮 —— 否则第二次发消息就秒停。"""
         runtime, store, provider, bus = make_runtime(tmp_path)
-        runtime._cancel_event.set()
+        # 模块 11：中止信号是**每个运行实例一份**的，
+        # 上一轮的信号随实例注销，不会漏到下一轮。
+        # 这里模拟「上一轮留下了一个被置位的信号」。
+        runtime.mark_run_pending()
+        runtime._only_run_abort().event.set()
         task_id = store.create_task("再跑一次", "efficiency", "test")
         runtime.run("再跑一次", session_id=task_id)
-        assert not runtime._cancel_event.is_set()
         assert store.get_task(task_id)["status"] == "done"
 
     def test_approval_wait_interrupted_by_cancel(self, tmp_path):
@@ -253,6 +279,37 @@ class TestCancel:
         t.join(timeout=5)
         assert not t.is_alive(), "审批等待没被停止打断"
         assert result["approved"] is False
+
+    def test_cancel_only_wakes_matching_approval(self, tmp_path):
+        """停止只认「同一个任务、同一个账号」的审批等待，别人的不能碰。"""
+        runtime, *_ = make_runtime(tmp_path)
+        results = {}
+
+        def wait(step, task, owner):
+            results[step] = runtime.wait_approval(step, timeout=30, task_id=task, owner_id=owner)
+
+        threads = {}
+        for step, task, owner in (("step_a", "task-a", "alice"), ("step_b", "task-b", "bob")):
+            threads[step] = threading.Thread(target=wait, args=(step, task, owner), daemon=True)
+            threads[step].start()
+        deadline = time.time() + 5
+        while len(runtime._approvals) < 2 and time.time() < deadline:
+            time.sleep(0.01)
+        assert len(runtime._approvals) == 2, "两个审批等待都要先登记上"
+
+        # 账号对不上、任务对不上 —— 都不算数，也不能碰中止标志
+        assert runtime.cancel(task_id="task-a", owner_id="bob")["ok"] is False
+        assert runtime.cancel(task_id="task-x", owner_id="alice")["ok"] is False
+        assert all(t.is_alive() for t in threads.values())
+
+        # 匹配的那一笔：立刻唤醒，结果按「未确认」算
+        assert runtime.cancel(task_id="task-a", owner_id="alice")["ok"] is True
+        threads["step_a"].join(timeout=5)
+        assert not threads["step_a"].is_alive(), "匹配的审批等待要被立刻打断"
+        assert results["step_a"] is False
+        # 没有运行可消费这笔中止 —— 任何运行实例的代号都不能动，
+        # 否则下一条消息会被秒停
+        assert not runtime._runs, "这两个审批等待不隶属于任何运行实例"
 
     def test_cancel_during_startup_is_not_swallowed(self, tmp_path):
         """任务刚起步时点的停止，必须真的停住。

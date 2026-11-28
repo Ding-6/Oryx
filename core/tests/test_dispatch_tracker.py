@@ -58,6 +58,14 @@ class TestDispatchTracker:
         t.end(7)
         assert t.state(7) == "landed"
 
+    def test_cancel_authorization_is_scoped_to_task_and_owner(self, tracker):
+        t = tracker()
+        t.begin(7, "alice", "task-a")
+        t.end(7, "task-a")
+        assert t.authorized_cancel("alice", "task-a")
+        assert not t.authorized_cancel("alice", "task-b")
+        assert not t.authorized_cancel("bob", "task-a")
+
     def test_cancel_ahead_is_remembered(self, tracker):
         """中止先到：这笔要记下来，等 chat 到了补上。"""
         t = tracker()

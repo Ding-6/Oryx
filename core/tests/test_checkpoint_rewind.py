@@ -344,3 +344,71 @@ def test_session_domain_rename_missing_raises_404(tmp_path):
     with pytest.raises(HTTPException) as exc:
         session_domain.rename_session(store, "nope", "新名字")
     assert exc.value.status_code == 404
+
+
+# ------------------------------------------------------------------ 运行中守卫
+
+
+class BusyAgent(FakeAgent):
+    """内核说「这个会话正在运行」。"""
+
+    def call(self, method: str, timeout: float = 60.0, **params):
+        return {"ok": False, "content": "这个会话正在运行，先停止或等它结束再回退"}
+
+
+def test_domain_rewind_busy_maps_to_400():
+    """运行中回退要给出人话，而不是 500 或静默成功。"""
+    with pytest.raises(HTTPException) as exc:
+        ckpt_domain.rewind_checkpoint(BusyAgent(), "cp1", "Code")
+    assert exc.value.status_code == 400
+    assert "正在运行" in str(exc.value.detail)
+
+
+class _FakeStore:
+    def get_checkpoint(self, checkpoint_id):
+        return {"id": checkpoint_id, "task_id": "task-1"}
+
+
+class _NoRewind:
+    def rewind(self, *args, **kwargs):
+        raise AssertionError("运行中不该真的回退")
+
+
+def test_agentd_blocks_rewind_while_task_running():
+    """运行中边写文件边回退会把内容写乱 —— 必须拦在真正执行之前。
+
+    只拦**目标会话自己**的运行：别的会话在跑不影响这里。
+    """
+    import types
+
+    from oryx.agentd import AgentDaemon
+
+    daemon = AgentDaemon.__new__(AgentDaemon)   # 不起进程，只借这个方法
+    daemon.runtime = types.SimpleNamespace(
+        store=_FakeStore(),
+        checkpoints=_NoRewind(),
+        is_task_running=lambda task_id: task_id == "task-1",
+    )
+
+    out = daemon.checkpoint_rewind("cp1", "Code")
+
+    assert out["ok"] is False
+    assert "正在运行" in out["content"]
+
+
+def test_is_task_running_only_matches_own_task(tmp_path):
+    from oryx.config import DEFAULT_CONFIG, Config
+    from oryx.events import EventBus
+    from oryx.loop import AgentRuntime
+    from oryx.store import Store
+
+    data = dict(DEFAULT_CONFIG)
+    data["allowed_roots"] = [str(tmp_path)]
+    data["forbidden_paths"] = []
+    data["workspace"] = str(tmp_path)
+    runtime = AgentRuntime(Config(data), Store(tmp_path / "oryx.db"), EventBus())
+
+    assert runtime.is_task_running("t1") is False
+    runtime.mark_run_pending(task_id="t1")
+    assert runtime.is_task_running("t1") is True, "已排队未开跑也要算运行中"
+    assert runtime.is_task_running("t2") is False, "别的会话不能被算进来"

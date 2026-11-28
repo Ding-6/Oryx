@@ -161,6 +161,30 @@ def test_split_script_is_idempotent():
     assert "逐字节相同" in r.stdout
 
 
+def test_split_script_survives_gbk_console():
+    """拆分脚本在 Windows 中文控制台（cp936/GBK）下也必须正常退出。
+
+    2026-11-26 实测：脚本成功时 print 了 ✓，GBK 编不出来，UnicodeEncodeError
+    让 --check 以非零码退出，上面那条幂等测试跟着红。这里强制子进程用 gbk
+    输出，把「不同 locale 都不能因为打印一句话而崩」锁住。
+    """
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "gbk"
+    r = subprocess.run(
+        [sys.executable, "scripts/extract_system_prompt.py", "--check"],
+        cwd=str(CORE), capture_output=True, timeout=60, env=env,
+    )
+    out = r.stdout.decode("gbk", errors="replace")
+    err = r.stderr.decode("gbk", errors="replace")
+    assert r.returncode == 0, f"GBK 控制台下 --check 失败：{out}\n{err}"
+    assert "UnicodeEncodeError" not in err, f"又出现了编码崩溃：{err}"
+    assert "[OK]" in out, f"成功标记没了：{out}"
+
+
 def test_no_system_prompt_literal_left_in_loop():
     """loop.py 里不该再有系统提示词的大段字面量。
 

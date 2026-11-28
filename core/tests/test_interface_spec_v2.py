@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 CORE = Path(__file__).resolve().parents[1]
@@ -43,6 +44,9 @@ def _live_routes() -> set[tuple[str, str]]:
     cfg = load_config()
 
     class _Store:
+        def __init__(self):
+            self.conv_path = Path(tempfile.gettempdir()) / "oryx-interface-spec-test" / "oryx.db"
+
         def __getattr__(self, name):
             raise RuntimeError("stub")
 
@@ -88,8 +92,14 @@ def _spec_routes() -> set[tuple[str, str]]:
     """规格文档里列出的路由。"""
     text = SPEC.read_text(encoding="utf-8")
     out: set[tuple[str, str]] = set()
-    for m in re.finditer(r"\|\s*(GET|POST|PUT|DELETE|PATCH)\s*\|\s*`(/api[^`]*)`", text):
-        out.add((m.group(1), re.sub(r"\{[^}]*\}", "{}", m.group(2))))
+    patterns = (
+        r"\|\s*(GET|POST|PUT|DELETE|PATCH)\s*\|\s*`(/api[^`]*)`",
+        r"\|\s*`(GET|POST|PUT|DELETE|PATCH)\s+(/api[^`]*)`\s*\|",
+    )
+    for pattern in patterns:
+        for m in re.finditer(pattern, text):
+            path = m.group(2).split("?", 1)[0]
+            out.add((m.group(1), re.sub(r"\{[^}]*\}", "{}", path)))
     return out
 
 

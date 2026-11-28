@@ -94,7 +94,26 @@ def split_sections(text: str) -> list[tuple[str, str]]:
     return out
 
 
+def _safe_stdout() -> None:
+    """让诊断输出在任何控制台编码下都不会把脚本掀翻。
+
+    2026-11-26 实测：Windows 中文终端默认 cp936/GBK，原先成功时打印的 ✓ / ✗
+    编不进去，print 直接抛 UnicodeEncodeError —— 明明校验是通过的，却因为
+    「打印一句祝贺」让 --check 以非零码退出，test_split_script_is_idempotent
+    跟着变红。这里把「编不出来的字符」降级成转义序列，中文照常显示。
+    """
+    stream = getattr(sys, "stdout", None)
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(errors="backslashreplace")
+    except (ValueError, OSError):
+        pass
+
+
 def main() -> int:
+    _safe_stdout()
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="只校验，不写文件")
     args = ap.parse_args()
@@ -113,7 +132,7 @@ def main() -> int:
                 print(f"  原文上下文: {text[max(0,i-40):i+40]!r}")
                 break
         return 1
-    print(f"✓ 分段拼装与原文逐字节相同（{len(text)} 字符，{len(sections)} 段）")
+    print(f"[OK] 分段拼装与原文逐字节相同（{len(text)} 字符，{len(sections)} 段）")
 
     if args.check:
         return 0
@@ -129,9 +148,9 @@ def main() -> int:
     for name in loader.SECTION_ORDER:
         path = SYSTEM_DIR / f"{name}.md"
         if not path.exists():
-            print(f"✗ 缺文件 {path}")
+            print(f"[FAIL] 缺文件 {path}")
             return 1
-    print("✓ 全部段落文件已落盘，loader 的 SECTION_ORDER 与脚本一致")
+    print("[OK] 全部段落文件已落盘，loader 的 SECTION_ORDER 与脚本一致")
     return 0
 
 

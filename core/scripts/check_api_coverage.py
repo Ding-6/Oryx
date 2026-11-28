@@ -112,31 +112,7 @@ def _routes_from_runtime() -> list[tuple[str, str]]:
         os.environ.setdefault("ORYX_HOME", r"D:\OryxData\data")
         sys.path.insert(0, str(CORE))
         server = importlib.import_module("oryx.server")
-        domains = importlib.import_module("oryx.domains")
-        config_mod = importlib.import_module("oryx.config")
         app = server.app
-        cfg = config_mod.load_config()
-
-        class _Stub:
-            def __getattr__(self, name):
-                raise RuntimeError("stub")
-
-        class _StubAgent:
-            async def call_async(self, *a, **k):
-                raise RuntimeError("stub")
-
-        class _StubBus:
-            def publish(self, *a, **k):
-                pass
-
-        domains.register_all(
-            app,
-            store=_Stub(),
-            config=cfg,
-            agent=_StubAgent(),
-            bus=_StubBus(),
-            api_token="",
-        )
     except Exception:
         return []
 
@@ -204,7 +180,7 @@ API_CALL_RE = re.compile(r"""api\s*\(\s*[`'"](/[^`'"]*)[`'"]""")
 # 泛型里可能有嵌套尖括号（`api.get<Array<{a: string}>>`），
 # 所以泛型部分写成「一层或两层尖括号」，里面不含 `>`。
 CLIENT_CALL_RE = re.compile(
-    r"api\s*\.\s*(get|post|put|del|delete|patch)\s*"
+    r"api\s*\.\s*(get|postForm|post|put|del|delete|patch)\s*"
     r"(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(\s*[`'\"](/[^`'\"]*)[`'\"]"
 )
 FETCH_RE = re.compile(r"""fetch\s*\(\s*[`'"](/[^`'"]*)[`'"]""")
@@ -214,6 +190,7 @@ FETCH_RE = re.compile(r"""fetch\s*\(\s*[`'"](/[^`'"]*)[`'"]""")
 _CLIENT_METHODS = {
     "get": "GET",
     "post": "POST",
+    "postform": "POST",
     "put": "PUT",
     "del": "DELETE",
     "delete": "DELETE",

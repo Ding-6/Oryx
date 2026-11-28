@@ -117,6 +117,20 @@ def test_session_detail_shape(client, store):
         store.delete_session(task_id)
 
 
+def test_session_approvals_is_array(client, store):
+    """审批兜底接口：data 是数组，内核没等确认时是空数组。"""
+    task_id = store.create_task("审批兜底契约", "craft", "minimax")
+    try:
+        data = _data(client.get(f"/api/sessions/{task_id}/approvals"))
+        assert isinstance(data, list)
+    finally:
+        store.delete_session(task_id)
+
+
+def test_session_approvals_404(client):
+    _err(client.get("/api/sessions/no-such-task/approvals"))
+
+
 def test_session_detail_404(client):
     resp = client.get("/api/sessions/does-not-exist")
     assert resp.status_code == 404

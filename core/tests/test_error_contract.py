@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 CORE = Path(__file__).resolve().parents[1]
@@ -44,6 +45,9 @@ def _client() -> TestClient:
     cfg = load_config()
 
     class _Store:
+        def __init__(self):
+            self.conv_path = Path(tempfile.gettempdir()) / "oryx-error-contract-test" / "oryx.db"
+
         def __getattr__(self, name):
             raise RuntimeError("stub")
 
