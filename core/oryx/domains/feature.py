@@ -7,12 +7,32 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, ConfigDict
 
 from ..config import FEATURES_PATH
 from ..features import FeatureFlags, feature_catalog
 from ._common import json
 
 router = APIRouter(prefix="/api/features", tags=["特性开关"])
+
+
+class FeatureToggleRequest(BaseModel):
+    """切换开关的请求契约。
+
+    以前这里是裸 dict 请求体 + `bool(req.get("value"))`：
+      · `{"value": "false"}` → `bool("false")` 是 **True** —— 想关结果开了；
+      · `key` 完全不校验，随便一个名字都能写进开关文件，
+        `GET /api/features` 里又不会出现，成了永远看不见的幽灵键。
+
+    现在交给 Pydantic：`value` 走标准布尔解析（`"false"` → False），
+    `extra="forbid"` 挡住拼错的字段；`key` 的白名单在 `toggle()` 里
+    用 `feature_catalog()` 动态取，不另抄一份清单。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    value: bool
 
 
 def read_features() -> dict:
@@ -51,14 +71,21 @@ def read_profile() -> str:
     return "personal"
 
 
-def toggle(req: dict) -> dict:
-    """切换单个开关。需要 `EnableFeatureFlags` 为真。"""
-    key = str(req.get("key", "")).strip()
-    value = bool(req.get("value", False))
+def toggle(req: FeatureToggleRequest) -> dict:
+    """切换单个开关。需要 `EnableFeatureFlags` 为真。
+
+    `key` 必须在 `feature_catalog()` 里 —— 目录是唯一数据源，
+    不在这里另维护一份白名单，免得加开关时两处对不上。
+    """
+    key = req.key.strip()
+    value = req.value
     if not key:
         raise HTTPException(400, "key 不能为空")
 
     flags = FeatureFlags.load(FEATURES_PATH)
+    known = {str(card.get("key") or "") for card in feature_catalog(flags)}
+    if key not in known:
+        raise HTTPException(400, f"没有这个特性开关：{key}")
     if not flags.is_enabled("EnableFeatureFlags"):
         raise HTTPException(403, "EnableFeatureFlags 已关闭，禁止运行时调整")
 
@@ -88,7 +115,7 @@ def register(app) -> None:
         return json(read_features())
 
     @router.post("/toggle")
-    async def _toggle(req: dict):
+    async def _toggle(req: FeatureToggleRequest):
         return json(toggle(req))
 
     app.include_router(router)

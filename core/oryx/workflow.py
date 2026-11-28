@@ -1,4 +1,4 @@
-﻿"""工作流编排引擎：把"计划"从模型上下文挪到脚本里。
+"""工作流编排引擎：把"计划"从模型上下文挪到脚本里。
 
 对齐 WorkBuddy 的 Dynamic Workflows（`agent()` / `parallel()` / `pipeline()`
 / `phase()`），但**不引入 JS 运行时**。差别与理由：

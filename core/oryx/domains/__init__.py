@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from . import (
+    account,
     app as app_domain,
     appearance,
     chat,
@@ -23,6 +24,7 @@ from . import (
     feature,
     file,
     index,
+    knowledge,
     mcp,
     memory,
     model_config,
@@ -62,6 +64,7 @@ DOMAINS = (
     (persona, "人设与子 Agent 的增删改查"),
     (team, "多 Agent 团队编队"),
     (index, "本地索引、磁盘、图库"),
+    (knowledge, "账号隔离的知识集合与来源追踪"),
     (preference, "交互模式、回答风格、计算模式"),
     (chat, "对话、剪贴板、粘贴、审批"),
     (app_domain, "应用安装、启动、图标、自定义应用"),
@@ -76,11 +79,13 @@ def register_all(app, *, store, config, agent, bus, api_token: str = "") -> None
     agent 在这里展开成各域真正需要的依赖（目前只有 RPC 代理），
     而不是把整个 AgentLink 到处传 —— 领域与领域之间不互相依赖。
     """
-    session.register(app, store)
+    account.register(app, store)
+    knowledge.register(app, store, config, bus)
+    session.register(app, store, agent)
     model_config.register(app, config)
     skill.register(app, agent)
     schedule.register(app, agent)
-    checkpoint.register(app, agent)
+    checkpoint.register(app, agent, store)
     workflow.register(app, agent)
     appearance.register(app, config, api_token)
     feature.register(app)
@@ -92,7 +97,7 @@ def register_all(app, *, store, config, agent, bus, api_token: str = "") -> None
     toolpack.register(app, config)
     mcp.register(app, agent)
     file.register(app, config, agent)
-    persona.register(app, config, agent)
+    persona.register(app, config, agent, store)
     team.register(app, agent, bus)
     index.register(app, config, agent, store)
     preference.register(app, config)

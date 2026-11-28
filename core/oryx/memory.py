@@ -306,7 +306,7 @@ class MemoryService:
             return ""
         return self.render_rules(rules)
 
-    def static_block(self, limit: int = 15) -> str:
+    def static_block(self, limit: int = 15, owner_id: str | None = None) -> str:
         """用户级 + 项目级记忆拼成的常驻块。"""
         data = self.load_all()
         lines: list[str] = []
@@ -318,7 +318,7 @@ class MemoryService:
                 lines.append(f"【{title}】{text}")
         if self.store is not None:
             try:
-                for m in self.store.search_memories("", limit):
+                for m in self.store.search_memories("", limit, owner_id):
                     lines.append(f"- {m['text']}")
             except Exception:
                 pass

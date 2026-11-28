@@ -11,11 +11,18 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from ..ipc import IpcError
 from ._common import json, rpc_failure
 
 router = APIRouter(prefix="/api/mcp", tags=["MCP"])
+
+
+class McpToggleRequest(BaseModel):
+    """启停一个 MCP 服务器。name 为空仍由业务层给中文 400。"""
+    name: str = ""
+    enabled: bool = False
 
 
 async def list_servers(agent) -> dict:
@@ -45,11 +52,7 @@ def register(app, agent) -> None:
         return json(await list_servers(agent))
 
     @router.post("/toggle")
-    async def _toggle(req: dict):
-        return json(await toggle(
-            agent,
-            str(req.get("name") or ""),
-            bool(req.get("enabled", False)),
-        ))
+    async def _toggle(req: McpToggleRequest):
+        return json(await toggle(agent, req.name, req.enabled))
 
     app.include_router(router)

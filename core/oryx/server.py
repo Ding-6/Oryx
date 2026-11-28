@@ -1,4 +1,4 @@
-﻿"""本地 HTTP + SSE 服务：前端与 Agent 内核之间唯一的通道。
+"""本地 HTTP + SSE 服务：前端与 Agent 内核之间唯一的通道。
 
 进程分工（对齐 Marvis 的「壳 → 网关 → 内核」三段式）：
 
@@ -32,11 +32,12 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from .agentlink import AgentLink
 from .api.auth import COOKIE_NAME as _AUTH_COOKIE_NAME  # noqa: F401
 from .api.auth import resolve_token_candidate
+from .domains.account import SESSION_COOKIE, token_digest
 from .config import load_config
 from .events import EventBus
 from .ipc import IpcError
@@ -65,6 +66,8 @@ def _relay_kernel_event(ev: dict[str, Any]) -> None:
     kind = ev.get("type", "agent.event")
     if kind == "RUN_FINISHED":
         agent.clear_run()
+        from .domains.chat import _dispatch
+        _dispatch.complete()
     payload = {
         k: v for k, v in ev.items() if k not in ("seq", "trace_id", "type", "ts")
     }
@@ -112,11 +115,11 @@ DISABLE_REQUEST_VALIDATION = os.environ.get("ORYX_DISABLE_REQUEST_VALIDATION") =
 
 # 这些路径不校验来源：静态资源与探活没有副作用。
 #
-# `/newui` 也在里面 —— 它和 `/` 一样，**自己**会下发 HttpOnly cookie，
-# 所以「访问它」就是「拿到凭据」的那一步。
-# 不放行的话会死锁：中间件先挡掉请求，路由根本没机会下发 cookie，
-# 用户打开新界面只会看到一个 401。
+# `/newui` 是账号登录入口，必须允许未登录用户加载页面；页面本身不包含凭据。
+# 不放行的话会死锁：中间件先挡掉请求，登录页就无法显示。
 _PUBLIC_PATHS = ("/", "/newui", "/api/ping", "/favicon.ico")
+_PUBLIC_AUTH_PATHS = {"/api/auth/status", "/api/auth/register", "/api/auth/login"}
+_DEV_UI_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173"}
 # 只读方法不需要来源标记（EventSource 之类的被动请求带不了自定义头）。
 _SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 
@@ -172,7 +175,7 @@ WEB_MAX_BYTES = 8 * 1024 * 1024
 
 @app.middleware("http")
 async def _require_token(request: Request, call_next):
-    """除了首页、静态资源和探活，所有接口都要带令牌。
+    """除静态与首次登录入口外，所有接口都要有当前账号凭据。
 
     没有这道闸，同机任意网页都能 POST /api/chat 执行命令——
     CORS 挡得住读响应，挡不住发请求。
@@ -186,24 +189,46 @@ async def _require_token(request: Request, call_next):
     if path in _PUBLIC_PATHS or path.startswith("/web/"):
         return await call_next(request)
 
-    cookie_token = request.cookies.get(COOKIE_NAME)
-    # 三个来源的取法统一走 api/auth.py ——
-    # 域里若有路由要自己再校验一次（背景图那条就是），
-    # 两边的规则必须一致，否则会出现「中间件放行、域里又拒」。
-    provided = resolve_token_candidate(request)
-    if not provided or not _tokens_match(provided, API_TOKEN):
-        # 这里**必须 return 而不是 raise** ——
-        # 用户中间件里 raise 的异常走不到 `ExceptionMiddleware`
-        #（它在最内层、只包着路由），会一路冒到最外层的 ServerErrorMiddleware，
-        # 结果 401 被当成未捕获异常 → 变成 500。
-        # 之前就踩过：把 return 换成 raise，六个安全测试全红。
-        #
-        # 但 body 形状要走统一的 `_error_body` ——
-        # 否则这个接口的错误体跟别的接口长得不一样（只有 detail，没有 code/message）。
+    # 注册、登录需要在未登录时可用，但写请求仍必须带来源标记，防跨站表单提交。
+    if path in _PUBLIC_AUTH_PATHS:
+        origin = request.headers.get("origin")
+        if origin and not _same_origin(request) and origin not in _DEV_UI_ORIGINS:
+            return JSONResponse(
+                status_code=403,
+                content=_error_body(403, "账号请求必须来自 Oryx 界面"),
+            )
+        if (not DISABLE_REQUEST_VALIDATION and request.method not in _SAFE_METHODS
+                and request.headers.get(REQUEST_HEADER) != REQUEST_HEADER_VALUE):
+            return JSONResponse(
+                status_code=403,
+                content=_error_body(403, f"缺少来源标记（{REQUEST_HEADER}: {REQUEST_HEADER_VALUE}）"),
+            )
+        return await call_next(request)
+
+    session_cookie = request.cookies.get(SESSION_COOKIE, "")
+    user = store.user_for_login_session(token_digest(session_cookie)) if session_cookie else None
+    if user:
+        request.state.user_id = user["id"]
+        if not _same_origin(request):
+            return JSONResponse(
+                status_code=403,
+                content=_error_body(403, "跨源请求不接受 cookie 鉴权"),
+            )
+    elif store.user_count() > 0:
+        # The old machine-wide API token is intentionally disabled once accounts exist;
+        # otherwise it would bypass conversation ownership for every account.
         return JSONResponse(
             status_code=401,
-            content=_error_body(401, "缺少或错误的访问令牌（X-Oryx-Token）"),
+            content=_error_body(401, "登录状态已失效，请重新登录"),
         )
+    else:
+        provided = resolve_token_candidate(request)
+        if not provided or not _tokens_match(provided, API_TOKEN):
+            return JSONResponse(
+                status_code=401,
+                content=_error_body(401, "缺少或错误的访问令牌（X-Oryx-Token）"),
+            )
+        request.state.user_id = None
 
     # cookie 鉴权 → 必须同源。
     #
@@ -214,7 +239,7 @@ async def _require_token(request: Request, call_next):
     #
     # 令牌走 header / 查询参数的不受此限：知道令牌就等于有凭据，
     # 那种调用本来就是给命令行与 relay 用的。
-    if cookie_token and not _same_origin(request):
+    if request.cookies.get(COOKIE_NAME) and not session_cookie and not _same_origin(request):
         return JSONResponse(
             status_code=403,
             content=_error_body(403, "跨源请求不接受 cookie 鉴权"),
@@ -363,6 +388,9 @@ async def index() -> Any:
 
     页面自己怎么鉴权？靠 cookie 自动携带（`credentials: 'same-origin'`）。
     """
+    # 账号模式启用后，主入口切到唯一主界面；首次注册仍可直接打开 /newui。
+    if store.user_count() > 0:
+        return RedirectResponse("/newui")
     html = (WEB_DIR / "index.html").read_text("utf-8")
     response = HTMLResponse(html)
     # HttpOnly：JS 读不到 document.cookie
@@ -389,24 +417,15 @@ async def new_ui() -> Any:
 
     **为什么要在这里下发 cookie**
     ------------------------------
-    新前端的 API 调用要带 HttpOnly cookie（令牌不在 JS 里）。
-    cookie 由服务端在响应里下发，所以**打开这个地址本身**就要把 cookie 带上，
-    否则页面能渲染、但每个 API 都 401（前端会显示「连不上内核服务」）。
+    新前端通过账号登录建立独立的 HttpOnly 会话 cookie；页面本身不下发
+    机器级 API 令牌，避免多用户环境里账号共享一个凭据。
 
     静态资源在 `/web/newui/`（构建时 base 就是这么定的）。
     """
     index = WEB_DIR / "newui" / "index.html"
     if not index.is_file():
         raise HTTPException(404, "新界面还没构建 —— 先在 apps/web 跑 npm run build")
-    response = HTMLResponse(index.read_text("utf-8"))
-    response.set_cookie(
-        COOKIE_NAME,
-        API_TOKEN,
-        httponly=True,
-        samesite="strict",
-        path="/",
-    )
-    return response
+    return HTMLResponse(index.read_text("utf-8"))
 
 
 @app.get("/web/ui-extensions/{path:path}")
@@ -517,8 +536,14 @@ async def web_asset(path: str) -> Response:
 
 @app.get("/api/ping")
 async def ping() -> JSONResponse:
-    """探活。公开、无副作用、不泄露信息。"""
-    return JSONResponse({"ok": True})
+    """探活。公开、无副作用、不泄露信息。
+
+    `service` 是**桌面壳与 Rust 侧身份校验**的依据：只探 TCP 端口的话，
+    任何占了 8765 的本地服务都会被当成 Oryx 内核（2026-11-26 实测被
+    「地导目标分析」后端占用，桌面端直接跳到人家的 JSON 页面上）。
+    `ok` 保留给既有调用方，字段不要删、不要改名。
+    """
+    return JSONResponse({"ok": True, "service": "oryx"})
 
 
 @app.get("/api/events")
@@ -530,6 +555,18 @@ async def events(request: Request, since: int = -1) -> StreamingResponse:
     宁可少补也不能乱序。
     """
     queue = bus.subscribe()
+    owner_id = getattr(request.state, "user_id", None)
+
+    def scoped_event(event: dict[str, Any]) -> dict[str, Any] | None:
+        # During the pre-account single-user phase preserve the original event stream.
+        if owner_id is None:
+            return event
+        task_id = event.get("task_id")
+        if task_id and store.get_task(str(task_id), owner_id) is not None:
+            return {k: v for k, v in event.items() if k != "_owner_id"}
+        if event.get("_owner_id") == owner_id:
+            return {k: v for k, v in event.items() if k != "_owner_id"}
+        return None
 
     async def generator():
         try:
@@ -538,7 +575,9 @@ async def events(request: Request, since: int = -1) -> StreamingResponse:
                     yield f"data: {json.dumps(bus.control('resync'), ensure_ascii=False)}\n\n"
                 else:
                     for ev in bus.replay_since(since):
-                        yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                        scoped = scoped_event(ev)
+                        if scoped is not None:
+                            yield f"data: {json.dumps(scoped, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps(bus.control('ready'), ensure_ascii=False)}\n\n"
             while True:
                 if await request.is_disconnected():
@@ -548,7 +587,10 @@ async def events(request: Request, since: int = -1) -> StreamingResponse:
                 except asyncio.TimeoutError:
                     yield ": ping\n\n"
                     continue
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                scoped = scoped_event(event)
+                if scoped is None:
+                    continue
+                yield f"data: {json.dumps(scoped, ensure_ascii=False)}\n\n"
         finally:
             bus.unsubscribe(queue)
 

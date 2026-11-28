@@ -49,6 +49,39 @@ class LocalModelRequest(BaseModel):
 
 
 # ---------- actions ----------
+def _clean_name(name: str) -> str:
+    """模型服务名要能安全地放进 URL 路径里。
+
+    名字会出现在 `PUT /api/providers/{name}` 这类路由中，带斜杠会让
+    请求根本匹配不到这条路由（前端看到的是 404，而不是「名字不合法」）。
+    所以在入口就挡住，并给出人话。
+    """
+    cleaned = (name or "").strip()
+    if not cleaned:
+        raise HTTPException(400, "模型服务名称不能为空")
+    if "/" in cleaned or "\\" in cleaned:
+        raise HTTPException(400, "模型服务名称不能包含斜杠")
+    if len(cleaned) > 64:
+        raise HTTPException(400, "模型服务名称太长了（最多 64 字）")
+    return cleaned
+
+
+def _clean_base_url(url: str) -> str:
+    cleaned = (url or "").strip()
+    if not cleaned:
+        raise HTTPException(400, "接口地址不能为空")
+    if not (cleaned.startswith("http://") or cleaned.startswith("https://")):
+        raise HTTPException(400, "接口地址要以 http:// 或 https:// 开头")
+    return cleaned
+
+
+def _clean_model(model: str) -> str:
+    cleaned = (model or "").strip()
+    if not cleaned:
+        raise HTTPException(400, "模型名不能为空")
+    return cleaned
+
+
 def list_providers(config: Config) -> dict:
     from .. import localmodels
 
@@ -63,6 +96,9 @@ def list_providers(config: Config) -> dict:
     return {
         "active": config.active_provider_name,
         "local": config.data.get("local_provider"),
+        # 云端槽位也要给前端 —— 否则切到本地模式后，界面上分不清
+        # 哪一条是「云端默认」（下次切回效率模式会用到的那个）。
+        "cloud": config.data.get("cloud_provider"),
         "items": items,
     }
 
@@ -143,11 +179,23 @@ def register_local_model(config: Config, req: LocalModelRequest) -> dict:
 
 
 def create_provider(config: Config, req: ProviderRequest) -> dict:
-    spec = {"type": req.type, "base_url": req.base_url, "model": req.model}
+    """新增一条模型服务。
+
+    **不做静默覆盖**：同名已存在时返回 409，让用户去编辑那一条。
+    以前 POST 直接 upsert —— 名字打错一个字就把别人的密钥和模型
+    悄悄换掉了，界面上只看到「添加成功」。
+    """
+    name = _clean_name(req.name)
+    base_url = _clean_base_url(req.base_url)
+    model = _clean_model(req.model)
+    if name in (config.data.get("providers") or {}):
+        raise HTTPException(409, f"已经有同名模型服务「{name}」，请直接编辑它或换个名字")
+
+    spec = {"type": req.type, "base_url": base_url, "model": model}
     if req.api_key:
         spec["api_key"] = req.api_key
     try:
-        result = manage.upsert_provider(config, req.name, spec)
+        result = manage.upsert_provider(config, name, spec)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"name": result["name"], "type": result["type"]}
@@ -166,10 +214,11 @@ def edit_provider(config: Config, name: str, req: ProviderEditRequest) -> dict:
     spec: dict[str, Any] = {}
     if req.type:
         spec["type"] = req.type
+    # 空串 = 不改（前端不回显，留空提交表示保持原样）
     if req.base_url is not None and req.base_url.strip():
-        spec["base_url"] = req.base_url.strip()
+        spec["base_url"] = _clean_base_url(req.base_url)
     if req.model is not None and req.model.strip():
-        spec["model"] = req.model.strip()
+        spec["model"] = _clean_model(req.model)
     # 密钥单独处理：空串不进 spec，upsert 会保留原有凭据库标记
     if req.api_key:
         spec["api_key"] = req.api_key

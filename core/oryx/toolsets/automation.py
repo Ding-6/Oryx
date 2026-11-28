@@ -9,30 +9,33 @@ from typing import Any
 from ..policy import PolicyEngine, Risk
 from ..tools import ToolSpec, build_registry, tool_result_text
 import time
+import uuid
 
 
 class AutomationToolsMixin:
     def _register_automation_tools(self) -> None:
         from ..automation import AutomationScheduler, describe
 
-        def _fire(item: Any) -> None:
+        def _fire(item: Any) -> dict[str, Any]:
             self.bus.publish(
-                "automation.fired", id=item.id, name=item.name, goal=item.goal
+                "automation.fired", id=item.id, name=item.name, goal=item.goal, _owner_id=item.owner_id
             )
             # 执行记录：先写一条 running 的行。
             # 这样**任务卡死或进程被杀**时也能看到「那次没跑完」。
-            run_id = f"arun_{item.id}_{int(time.time() * 1000)}"
+            run_id = f"arun_{uuid.uuid4().hex}"
             started = time.time()
             try:
                 self.store.start_automation_run(
-                    run_id, item.id, item.name, item.goal, started
+                    run_id, item.id, item.name, item.goal, started,
+                    owner_id=item.owner_id, attempt=item.attempt,
+                    parent_run_id=item.retry_parent_run_id, manual_retry=item.manual_retry,
                 )
             except Exception:
                 pass
             try:
-                text = self.run(item.goal, interaction="craft")
+                text = self.run(item.goal, interaction="craft", owner_id=item.owner_id)
                 self.bus.publish(
-                    "automation.done", id=item.id, name=item.name, text=text
+                    "automation.done", id=item.id, name=item.name, text=text, _owner_id=item.owner_id
                 )
                 try:
                     self.store.finish_automation_run(
@@ -40,8 +43,9 @@ class AutomationToolsMixin:
                     )
                 except Exception:
                     pass
+                return {"ok": True, "run_id": run_id}
             except Exception as exc:
-                self.bus.publish("automation.failed", id=item.id, error=str(exc))
+                self.bus.publish("automation.failed", id=item.id, error=str(exc), _owner_id=item.owner_id)
                 try:
                     self.store.finish_automation_run(
                         run_id, "failed", error=f"{type(exc).__name__}: {exc}"
@@ -51,6 +55,7 @@ class AutomationToolsMixin:
                 # 失败要**看得见** —— 用户不打开界面就完全错过。
                 # 走通知渠道：系统通知或 webhook。
                 self._notify_automation_failure(item, exc)
+                return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "run_id": run_id}
 
         def _on_error(item: Any, error: str) -> None:
             """调度器层的失败回调：事件 + **系统级通知**。
@@ -59,7 +64,10 @@ class AutomationToolsMixin:
             就完全收不到，等于「失败通知依旧静默」。两条路径共用带去重的
             通知函数，不会出现重复轰炸。
             """
-            self.bus.publish("automation.failed", id=item.id, error=error)
+            self.bus.publish(
+                "automation.failed", id=item.id, error=error,
+                _owner_id=getattr(item, "owner_id", None),
+            )
             self._notify_automation_failure(item, error)
 
         self.scheduler = AutomationScheduler(
@@ -78,20 +86,20 @@ class AutomationToolsMixin:
 
         def _add(name: str, cron: str, goal: str) -> dict[str, Any]:
             try:
-                item = self.scheduler.add(name, cron, goal)
+                item = self.scheduler.add(name, cron, goal, self._active_owner_id)
             except ValueError as exc:
                 return {"ok": False, "content": str(exc)}
             return {"ok": True, "content": item.to_dict()}
 
         def _list() -> dict[str, Any]:
-            return {"ok": True, "content": self.scheduler.list()}
+            return {"ok": True, "content": self.scheduler.list(self._active_owner_id)}
 
         def _remove(id: str) -> dict[str, Any]:
-            removed = self.scheduler.remove(id)
+            removed = self.scheduler.remove(id, self._active_owner_id)
             return {"ok": removed, "content": "已删除" if removed else "没有这个任务"}
 
         def _toggle(id: str, enabled: bool) -> dict[str, Any]:
-            item = self.scheduler.toggle(id, enabled)
+            item = self.scheduler.toggle(id, enabled, self._active_owner_id)
             if item is None:
                 return {"ok": False, "content": f"没有这个任务：{id}"}
             return {"ok": True, "content": item.to_dict()}
@@ -161,7 +169,9 @@ class AutomationToolsMixin:
             automations 表只记了 last_run_at。
             """
             try:
-                rows = self.store.automation_runs(id, limit=max(1, min(limit, 200)))
+                rows = self.store.automation_runs(
+                    id, limit=max(1, min(limit, 200)), owner_id=self._active_owner_id
+                )
             except Exception as exc:
                 return {"ok": False, "content": f"查执行记录失败：{exc}"}
             # 输出压一压：完整产出可能很长，只给摘要

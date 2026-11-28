@@ -12,12 +12,30 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from ..agentlink import AgentLink
 
 router = APIRouter(prefix="/api/skills", tags=["技能"])
 
 NAME_RE = re.compile(r"[A-Za-z0-9_\-一-鿿 ]{1,64}")
+
+
+class SkillCreateRequest(BaseModel):
+    """新建技能。老前端编辑时也会带 `name`（只读展示），额外字段一律忽略。"""
+    name: str = ""
+    description: str = ""
+    body: str = ""
+
+
+class SkillUpdateRequest(BaseModel):
+    """更新技能。**未传的字段沿用旧值**，传了空串就是清空。
+
+    用 `exclude_unset` 区分「没传」与「传了空串」—— 裸 dict 时代
+    `req.get(k, old)` 就是靠这个语义，迁移后不能丢。
+    """
+    description: str = ""
+    body: str = ""
 
 
 def skills_root() -> Path:
@@ -116,8 +134,8 @@ def read_skill(agent: AgentLink, name: str) -> dict:
     return {"name": s.name, "description": s.description, "body": s.body}
 
 
-def create_skill(agent: AgentLink, req: dict) -> dict:
-    name = str(req.get("name", "")).strip()
+def create_skill(agent: AgentLink, req: SkillCreateRequest) -> dict:
+    name = req.name.strip()
     if not name:
         raise HTTPException(400, "name 不能为空")
     if _library().get(name) is not None:
@@ -125,22 +143,23 @@ def create_skill(agent: AgentLink, req: dict) -> dict:
     _write_skill_md(
         _skill_dir(name) / "SKILL.md",
         name,
-        str(req.get("description", "")).strip(),
-        str(req.get("body", "")),
+        req.description.strip(),
+        req.body,
     )
     _reload(agent)
     return {"created": name}
 
 
-def update_skill(agent: AgentLink, name: str, req: dict) -> dict:
+def update_skill(agent: AgentLink, name: str, req: SkillUpdateRequest) -> dict:
     s = _library().get(name)
     if s is None:
         raise HTTPException(404, "没有这个技能")
+    data = req.model_dump(exclude_unset=True)
     _write_skill_md(
         s.path,
         name,
-        str(req.get("description", s.description)).strip(),
-        str(req.get("body", s.body)),
+        str(data.get("description", s.description)).strip(),
+        str(data.get("body", s.body)),
     )
     _reload(agent)
     return {"updated": name}
@@ -168,11 +187,11 @@ def register(app, agent: AgentLink) -> None:
         return JSONResponse(read_skill(agent, name))
 
     @router.post("")
-    async def _create(req: dict):
+    async def _create(req: SkillCreateRequest):
         return JSONResponse(create_skill(agent, req))
 
     @router.put("/{name}")
-    async def _update(name: str, req: dict):
+    async def _update(name: str, req: SkillUpdateRequest):
         return JSONResponse(update_skill(agent, name, req))
 
     @router.delete("/{name}")

@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -31,6 +31,11 @@ class OptimizeRequest(BaseModel):
     skills: str = ""
     expert: str = ""
     style: str = ""
+
+
+class SysQueryRequest(BaseModel):
+    """系统设置查询 —— 以前是裸 dict 请求体，传个数组 / 字符串会 500。"""
+    name: str = ""
 
 
 # ══════════ 状态与预热 ══════════
@@ -108,16 +113,18 @@ async def app_state(config, agent, bus) -> dict:
 
 # ══════════ 用量与审计 ══════════
 
-def audit_for_task(store, task_id: str) -> dict:
+def audit_for_task(store, task_id: str, owner_id: str | None = None) -> dict:
+    if store.get_task(task_id, owner_id) is None:
+        raise HTTPException(404, "没有这个会话")
     return {"task_id": task_id, "audit": store.audit_for_task(task_id)}
 
 
-def usage_summary(store, hours: int = 24 * 30) -> dict:
-    return store.usage_summary(hours)
+def usage_summary(store, hours: int = 24 * 30, owner_id: str | None = None) -> dict:
+    return store.usage_summary(hours, owner_id)
 
 
-def recent_tasks(store) -> dict:
-    return {"tasks": store.recent_tasks(30)}
+def recent_tasks(store, owner_id: str | None = None) -> dict:
+    return {"tasks": store.recent_tasks(30, owner_id)}
 
 
 # ══════════ 能力清单 ══════════
@@ -146,7 +153,7 @@ def sys_switches() -> dict:
     return syssettings.switches()
 
 
-async def sys_query(req: dict) -> dict:
+async def sys_query(req: SysQueryRequest) -> dict:
     """只读地查一项系统设置状态。
 
     白名单只放 read 类函数：写操作（锁屏 / 改缩放 / 换壁纸）必须走
@@ -154,7 +161,7 @@ async def sys_query(req: dict) -> dict:
     """
     from .. import syssettings
 
-    name = str(req.get("name") or "").strip()
+    name = req.name.strip()
     readonly = {
         "power_status": syssettings.power_status,
         "display_settings": syssettings.display_settings,
@@ -203,6 +210,30 @@ def skill_map(raw: Any) -> dict[str, Any]:
     return out
 
 
+def optimize_payload(result: dict[str, Any]) -> dict:
+    """把 `promptopt.optimize()` 的返回压成**恒为对象**的出参。
+
+    规格 §3 缺陷 6：`optimize()` 在**空文本 / 失败**路径把 `content`
+    写成一句人话字符串，正常路径却写成 dict。以前这里直接
+    `json(result["content"])`，于是失败时响应体退化成 **JSON 字符串**，
+    老前端 `d.optimized` 拿到 undefined，界面只显示「优化失败」。
+
+    现在两条路径都返回对象，且成功路径仍保留 `optimized / notes /
+    original / critique` 四个键，老前端读法不变。
+    """
+    content = result.get("content")
+    if isinstance(content, dict):
+        return {"ok": bool(result.get("ok", True)), **content}
+    return {
+        "ok": False,
+        "original": str(result.get("original") or ""),
+        "optimized": str(result.get("optimized") or ""),
+        "notes": list(result.get("notes") or []),
+        "critique": [],
+        "message": str(content or "优化失败"),
+    }
+
+
 async def prompt_optimize(agent, config, req: OptimizeRequest) -> dict:
     """优化用户写的这句任务描述。"""
     from ..agentlink import IpcError
@@ -225,7 +256,7 @@ async def prompt_optimize(agent, config, req: OptimizeRequest) -> dict:
         style=req.style or config.data.get("style", ""),
         workspace=config.data.get("workspace") or "",
     )
-    return result["content"]
+    return optimize_payload(result)
 
 
 # ══════════ 目录浏览 ══════════
@@ -264,16 +295,20 @@ def register(app, config, agent, store, bus) -> None:
         return json(await app_state(config, agent, bus))
 
     @router.get("/audit/{task_id}")
-    async def _audit(task_id: str):
-        return json(audit_for_task(store, task_id))
+    async def _audit(task_id: str, request: Request):
+        return json(audit_for_task(store, task_id, getattr(request.state, "user_id", None)))
 
     @router.get("/usage")
-    async def _usage(hours: int = 24 * 30):
-        return json(usage_summary(store, hours))
+    async def _usage(request: Request, hours: int = 24 * 30):
+        # 负数会把 since 推到未来（查出来恒为 0），过大的值等于全表扫描。
+        # clamp 后回显在 window_hours 里，界面照实标注「近 N 天」，
+        # 不把用户传的值悄悄改掉还不告诉他。
+        window = max(1, min(int(hours), 8760))
+        return json(usage_summary(store, window, getattr(request.state, "user_id", None)))
 
     @router.get("/tasks")
-    async def _tasks():
-        return json(recent_tasks(store))
+    async def _tasks(request: Request):
+        return json(recent_tasks(store, getattr(request.state, "user_id", None)))
 
     @router.get("/capabilities")
     async def _capabilities():
@@ -284,7 +319,7 @@ def register(app, config, agent, store, bus) -> None:
         return json(sys_switches())
 
     @router.post("/sys/query")
-    async def _sys_query(req: dict):
+    async def _sys_query(req: SysQueryRequest):
         return json(await sys_query(req))
 
     @router.get("/doctor")

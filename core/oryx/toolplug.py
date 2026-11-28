@@ -151,7 +151,15 @@ def _load_module(path: Path) -> Any:
     # 放进 sys.modules 是必须的：模块内部若有相对导入或装饰器会依赖它
     sys.modules[mod_name] = module
     try:
-        spec.loader.exec_module(module)
+        # SourceFileLoader may trust a timestamp-based .pyc whose timestamp
+        # (one-second resolution) and source size still match. An extension
+        # edited twice quickly with same-length code can then appear to reload
+        # while continuing to execute the old bytecode. Compile the current
+        # source bytes directly so every reload observes the fingerprinted
+        # contents, independent of the bytecode cache.
+        source = path.read_bytes()
+        code = compile(source, str(path), "exec")
+        exec(code, module.__dict__)
     except Exception as exc:  # noqa: BLE001 — 扩展的错不该拖垮平台
         sys.modules.pop(mod_name, None)
         raise ToolPluginError(f"{path.name} 执行失败：{type(exc).__name__}: {exc}") from exc

@@ -61,6 +61,12 @@ class WorkspaceRequest(BaseModel):
     path: str = ""
 
 
+class OpenFileRequest(BaseModel):
+    """打开 / 定位产物。`path` 为空仍由业务层给中文 400，不改成 422。"""
+    path: str = ""
+    reveal: bool = False
+
+
 def checked_file(config, path: Any) -> Path:
     """产物类接口的统一路径闸门。
 
@@ -121,15 +127,15 @@ def preview(config, path: str = "") -> Response:
     return Response(content=data, media_type=media, headers=headers)
 
 
-def open_file(config, req: dict) -> dict:
+def open_file(config, req: OpenFileRequest) -> dict:
     """用系统默认程序打开一个文件（或在文件管理器里定位它）。
 
     为什么需要：产物面板以前只能显示一串路径，用户看到「生成好了 D:\\...\\报表.xlsx」
     之后**只能自己去找文件** —— 交付的最后一公里没通。
     这就是 Marvis 说的「产物点开即用」。
     """
-    target = checked_file(config, req.get("path"))
-    reveal = bool(req.get("reveal"))
+    target = checked_file(config, req.path)
+    reveal = req.reveal
     try:
         if sys.platform == "win32":
             if reveal:
@@ -155,7 +161,8 @@ def list_files(config, prefix: str = "", limit: int = 200) -> dict:
     roots = [Path(os.path.expandvars(os.path.expanduser(r))).resolve()
              for r in (config.allowed_roots or [])]
     if not roots:
-        return {"files": []}
+        # 规格 §3 缺陷 11：空范围也要带 count，否则前端按 count 读会拿到 undefined。
+        return {"files": [], "count": 0}
     base = Path(os.path.expandvars(os.path.expanduser(prefix))).resolve() if prefix else roots[0]
     if roots and not any(base == r or r in base.parents for r in roots):
         raise HTTPException(403, "不在允许访问的范围内")
@@ -231,7 +238,7 @@ def register(app, config, agent) -> None:
         return preview(config, path)
 
     @router.post("/open")
-    async def _open(req: dict):
+    async def _open(req: OpenFileRequest):
         return json(open_file(config, req))
 
     @router.get("/list")

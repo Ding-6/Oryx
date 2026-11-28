@@ -35,9 +35,10 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, RootModel
 
 from ..api.response import ok
 
@@ -61,6 +62,15 @@ class ToolPack(BaseModel):
     description: str = Field(default="", max_length=MAX_DESC)
     function: str = Field(default="", max_length=MAX_FUNC)
     tools: list[str] = Field(default_factory=list)
+
+
+class ToolPackImportRequest(RootModel[dict[str, Any]]):
+    """插件清单**本体** —— body 就是清单，不是 `{manifest: ...}` 包装。
+
+    清单字段形状由 `import_pack` 做业务校验（kind / displayName / tools…），
+    这里只保证「最外层必须是 JSON 对象」：传数组 / 字符串 / 数字 → 422，
+    不再让 `manifest.get` 抛 AttributeError → 500。
+    """
 
 
 def _slug(name: str) -> str:
@@ -221,7 +231,7 @@ def export_pack(config, pack_id: str) -> dict:
     }
 
 
-def import_pack(config, manifest: dict) -> dict:
+def import_pack(config, manifest: dict[str, Any]) -> dict:
     """从插件清单导入一个工具包。
 
     清单既可能是本域导出的（带 function），也可能是扩展系统里的
@@ -278,8 +288,8 @@ def register(app, config) -> None:
         return ok(export_pack(config, pack_id))
 
     @router.post("/import")
-    async def _import(req: dict):
+    async def _import(req: ToolPackImportRequest):
         """从插件清单导入。"""
-        return ok(import_pack(config, req))
+        return ok(import_pack(config, req.root))
 
     app.include_router(router)

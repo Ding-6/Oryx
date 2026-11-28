@@ -65,10 +65,12 @@ class AgentToolsMixin:
             return set(self.agents.agents)
 
         def _team_create(name: str, members: Any, goal: str = "") -> dict[str, Any]:
-            team, err = self.teams.create(name, members, goal, known_agents=_known_agent_ids())
+            team, err = self.teams.create(
+                name, members, goal, known_agents=_known_agent_ids(), owner_id=self._active_owner_id
+            )
             if team is None:
                 return {"ok": False, "content": err}
-            self.bus.publish("team.created", team=team.to_dict())
+            self.bus.publish("team.created", team=team.to_dict(self._active_owner_id), _owner_id=self._active_owner_id)
             return {
                 "ok": True,
                 "content": f"已建团队「{team.name}」，成员：{team.roles()}",
@@ -76,41 +78,42 @@ class AgentToolsMixin:
             }
 
         def _team_delete(name: str) -> dict[str, Any]:
-            if not self.teams.delete(name):
-                return {"ok": False, "content": f"没有叫「{name}」的团队"}
-            self.bus.publish("team.deleted", name=name)
+            if not self.teams.delete(name, self._active_owner_id):
+                return {"ok": False, "content": f"没有这个团队，或你没有删除权限：{name}"}
+            self.bus.publish("team.deleted", name=name, _owner_id=self._active_owner_id)
             return {"ok": True, "content": f"已解散团队「{name}」"}
 
         def _team_list() -> dict[str, Any]:
-            return {"ok": True, "content": self.teams.list()}
+            return {"ok": True, "content": self.teams.list(self._active_owner_id)}
 
         def _team_add(team: str, agent: str, role: str = "") -> dict[str, Any]:
             if agent not in _known_agent_ids():
                 return {"ok": False, "content": f"没有这个子 Agent：{agent}"}
-            ok, err = self.teams.add_member(team, agent, role)
+            ok, err = self.teams.add_member(team, agent, role, self._active_owner_id)
             if not ok:
                 return {"ok": False, "content": err}
             obj = self.teams.get(team)
-            self.bus.publish("team.updated", team=obj.to_dict() if obj else {})
+            self.bus.publish("team.updated", team=obj.to_dict(self._active_owner_id) if obj else {}, _owner_id=self._active_owner_id)
             return {"ok": True, "content": f"{agent} 已加入「{team}」，成员：{obj.roles() if obj else ''}"}
 
         def _team_send(team: str, to: str, content: str) -> dict[str, Any]:
-            msg, err = self.teams.post(team, "main", to, content)
+            msg, err = self.teams.post(team, "main", to, content, self._active_owner_id)
             if msg is None:
                 return {"ok": False, "content": err}
-            self.bus.publish("team.message", team=team, message=msg.to_dict())
+            self.bus.publish("team.message", team=team, message=msg.to_dict(), _owner_id=self._active_owner_id)
             if to in ("broadcast", "all"):
                 return {"ok": True, "content": f"已广播给「{team}」全体成员"}
             return {"ok": True, "content": f"已投递消息给 {to}（内容未执行，用 team_dispatch 才会真的开工）"}
 
-        def _team_dispatch(team: str, agent: str) -> dict[str, Any]:
+        def _team_dispatch(team: str, agent: str, owner_id: str | None = None) -> dict[str, Any]:
+            owner_id = self._active_owner_id if owner_id is None else owner_id
             obj = self.teams.get(team)
             if obj is None:
                 return {"ok": False, "content": f"没有叫「{team}」的团队"}
             agent = (agent or "").strip()
             if agent not in obj.members:
                 return {"ok": False, "content": f"{agent} 不在「{team}」里，成员：{'、'.join(obj.members)}"}
-            inbox = self.teams.inbox(team, agent)
+            inbox = self.teams.inbox(team, agent, owner_id=owner_id)
             if not inbox:
                 return {"ok": False, "content": f"{agent} 信箱是空的，先用 team_send 派活"}
 
@@ -131,10 +134,11 @@ class AgentToolsMixin:
                 agent_name=spec.name if spec else agent,
                 agent_icon=spec.icon if spec else "",
                 goal=briefing[:400],
+                _owner_id=owner_id,
             )
             result = self.run_subagent(agent, briefing)
             text = result.get("content", "") if isinstance(result.get("content"), str) else str(result.get("content"))
-            self.teams.post(team, agent, "main", text)
+            self.teams.post(team, agent, "main", text, owner_id)
             self.bus.publish(
                 "team.member.done",
                 team=team,
@@ -146,13 +150,18 @@ class AgentToolsMixin:
                 # 用户会以为它说完了但其实什么都没说。
                 empty=not text.strip() or text.strip() == "（子 Agent 没有产出文本）",
                 ok=bool(result.get("ok")),
+                _owner_id=owner_id,
             )
             if not result.get("ok"):
                 return {"ok": False, "content": f"{agent} 执行失败：{text}"}
             return {"ok": True, "content": text}
 
         def _team_inbox(team: str, agent: str) -> dict[str, Any]:
-            return {"ok": True, "content": [m.to_dict() for m in self.teams.inbox(team, agent, mark_read=False)]}
+            return {"ok": True, "content": [
+                m.to_dict() for m in self.teams.inbox(
+                    team, agent, mark_read=False, owner_id=self._active_owner_id
+                )
+            ]}
 
         self.registry["team_create"] = ToolSpec(
             name="team_create",

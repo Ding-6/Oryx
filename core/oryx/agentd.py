@@ -120,6 +120,10 @@ class AgentDaemon:
             "chat.resume": self.chat_resume,   # 内核崩溃后从断点续跑
             "chat.cancel": self.chat_cancel,
             "chat.approve": lambda step_id, approved: rt.resolve_approval(step_id, bool(approved)),
+            # 页面刷新 / SSE 断线后靠它重建审批卡；内核没起来时 RPC 会报 503。
+            "chat.pending_approvals": lambda task_id=None, owner_id=None: rt.pending_approvals(
+                str(task_id or "") or None, owner_id
+            ),
             "chat.busy": self.chat_busy,
             # ---- 能力清单 ----
             "catalog.tools": self.catalog_tools,
@@ -180,26 +184,47 @@ class AgentDaemon:
                 str(checkpoint), str(scope or "CodeAndConversation")
             ),
             # ---- 自动任务 ----
-            "automation.list": lambda: rt.scheduler.list(),
-            "automation.add": lambda name, cron, goal: rt.scheduler.add(name, cron, goal).to_dict(),
-            "automation.remove": lambda id: rt.scheduler.remove(str(id)),
-            "automation.update": lambda id, name="", cron="", goal="": (
-                rt.scheduler.update(str(id), str(name or ""), str(cron or ""), str(goal or "")).to_dict()
-                if rt.scheduler.items.get(str(id)) else None
+            "automation.list": lambda owner_id=None: rt.scheduler.list(owner_id),
+            "automation.add": lambda name, cron, goal, owner_id=None: rt.scheduler.add(
+                name, cron, goal, owner_id
+            ).to_dict(),
+            "automation.remove": lambda id, owner_id=None: rt.scheduler.remove(str(id), owner_id),
+            "automation.update": lambda id, name="", cron="", goal="", owner_id=None: (
+                item.to_dict() if (item := rt.scheduler.update(
+                    str(id), str(name or ""), str(cron or ""), str(goal or ""), owner_id
+                )) else None
+            ),
+            "automation.toggle": lambda id, enabled, owner_id=None: (
+                item.to_dict() if (item := rt.scheduler.toggle(str(id), bool(enabled), owner_id)) else None
+            ),
+            "automation.runs": lambda id="", limit=50, owner_id=None: {
+                "runs": rt.store.automation_runs(
+                    str(id or ""), max(1, min(int(limit), 200)), owner_id=owner_id
+                )
+            },
+            "automation.retry_run": lambda run_id, owner_id=None: rt.scheduler.retry_failed_run(
+                str(run_id), owner_id
             ),
             # ---- 团队 ----
-            "team.list": lambda: self.team_list(),
-            "team.get": lambda name: self.team_get(str(name)),
-            "team.create": lambda name, members, goal="": self.team_create(name, members, str(goal or "")),
-            "team.delete": lambda name: rt.teams.delete(str(name)),
-            "team.add_member": lambda team, agent, role="": self.team_add_member(team, agent, str(role or "")),
-            "team.remove_member": lambda team, agent: self.team_remove_member(team, agent),
-            "team.update": lambda team, new_name="", goal=None, member="", role=None: self.team_update(
-                team, str(new_name or ""), goal, str(member or ""), role,
+            "team.list": lambda owner_id=None: self.team_list(owner_id),
+            "team.get": lambda name, owner_id=None: self.team_get(str(name), owner_id),
+            "team.create": lambda name, members, goal="", owner_id=None: self.team_create(
+                name, members, str(goal or ""), owner_id
             ),
-            "team.send_message": lambda team, to, content: self.team_send(team, to, content),
-            "team.dispatch": lambda team, agent: self.team_dispatch(team, agent),
-            "team.inbox": lambda team, agent: self.team_inbox(team, agent),
+            "team.delete": lambda name, owner_id=None: rt.teams.delete(str(name), owner_id),
+            "team.add_member": lambda team, agent, role="", owner_id=None: self.team_add_member(
+                team, agent, str(role or ""), owner_id
+            ),
+            "team.remove_member": lambda team, agent, owner_id=None: self.team_remove_member(team, agent, owner_id),
+            "team.update": lambda team, new_name="", goal=None, member="", role=None, owner_id=None: self.team_update(
+                team, str(new_name or ""), goal, str(member or ""), role, owner_id
+            ),
+            "team.save": lambda team, new_name="", goal=None, members=None, owner_id=None: self.team_save(
+                team, str(new_name or ""), goal, members, owner_id
+            ),
+            "team.send_message": lambda team, to, content, owner_id=None: self.team_send(team, to, content, owner_id),
+            "team.dispatch": lambda team, agent, owner_id=None: self.team_dispatch(team, agent, owner_id),
+            "team.inbox": lambda team, agent, owner_id=None: self.team_inbox(team, agent, owner_id),
             # ---- 工作流编排 ----
             "workflow.run": self.workflow_run,
             "workflow.status": lambda run_id="": self.workflow_status(str(run_id or "")),
@@ -232,7 +257,8 @@ class AgentDaemon:
     # ---------------------------------------------------------------- 任务
 
     def chat_run(self, goal: str, mode=None, interaction=None, style=None, expert=None,
-                  session_id=None, question_kept=False) -> dict[str, Any]:
+                  agent_id=None, config_snapshot=None, session_id=None,
+                  question_kept=False, owner_id=None) -> dict[str, Any]:
         """起一个 Agent 任务。立即返回，不等它跑完 —— 结果走事件流。
 
         ``session_id`` 是要续接的上一轮会话。传了就把它的上下文带过来，
@@ -243,10 +269,12 @@ class AgentDaemon:
         否则库里会出现 user, user, assistant 三条。
         """
         return self._launch(goal, mode, interaction, style, expert, session_id,
-                            question_kept)
+                            question_kept, owner_id=owner_id, agent_id=agent_id,
+                            config_snapshot=config_snapshot)
 
     def chat_resume(self, goal: str, mode=None, interaction=None, style=None,
-                    expert=None, session_id=None) -> dict[str, Any]:
+                    expert=None, agent_id=None, config_snapshot=None,
+                    session_id=None, owner_id=None) -> dict[str, Any]:
         """内核崩溃重启后：找中断的任务，带着已完成步骤从断点继续。
 
         找不到可续的断点（比如崩在第一步之前）就退回普通重跑 ——
@@ -256,6 +284,8 @@ class AgentDaemon:
 
         task_id = find_interrupted_task(self.runtime.store)
         if task_id:
+            task = self.runtime.store.get_task(task_id)
+            owner_id = (task or {}).get("owner_id")
             info = build_resume_brief(self.runtime.store, task_id)
             if info["has_progress"]:
                 self.bus.publish(
@@ -263,17 +293,39 @@ class AgentDaemon:
                     completed=info["completed"], last_tool=info["last_tool"],
                 )
                 return self._launch(goal, mode, interaction, style, expert,
-                                    session_id, False, info["brief"], task_id)
-        return self._launch(goal, mode, interaction, style, expert, session_id, False)
+                                    session_id, False, info["brief"], task_id,
+                                    owner_id=owner_id, agent_id=agent_id,
+                                    config_snapshot=config_snapshot)
+        return self._launch(goal, mode, interaction, style, expert, session_id, False,
+                            owner_id=owner_id, agent_id=agent_id,
+                            config_snapshot=config_snapshot)
 
     def _launch(self, goal: str, mode, interaction, style, expert, session_id,
-                question_kept=False, resume_brief="", resume_task_id="") -> dict[str, Any]:
+                question_kept=False, resume_brief="", resume_task_id="",
+                owner_id=None, agent_id=None, config_snapshot=None) -> dict[str, Any]:
         """起任务线程的唯一入口。chat_run / chat_resume 共用。"""
         rt = self.runtime
 
         if self._prewarm and not self._activated:
             # 待命内核不接活：它还没转正，跑了任务就没人知道结果该给谁
             raise RuntimeError("内核尚未激活")
+
+        # Allocate the conversation id before starting the background thread so the
+        # React client can open the new run immediately. Existing sessions and crash
+        # resumes keep their original id and frozen snapshot.
+        if not session_id and not resume_task_id:
+            provider_cfg = rt.config.provider_config()
+            runtime_cfg = (config_snapshot or {}).get("runtime") or {}
+            session_id = rt.store.create_task(
+                goal,
+                str(runtime_cfg.get("mode") or mode or rt.config.mode),
+                str(provider_cfg.get("name") or "?"),
+                owner_id=owner_id,
+                agent_id=agent_id,
+                expert_id=expert,
+                config_snapshot=config_snapshot,
+            )
+        task_id = session_id or resume_task_id
 
         def _run() -> None:
             self._busy = True
@@ -284,30 +336,41 @@ class AgentDaemon:
                 # 那一下不会被当成「没有任务在跑」而丢掉。
                 rt.run(goal, mode, interaction, style, expert, session_id,
                        question_kept, pending_slot=True,
-                       resume_brief=resume_brief, resume_task_id=resume_task_id)
+                       resume_brief=resume_brief, resume_task_id=resume_task_id,
+                       owner_id=owner_id, agent_id=agent_id,
+                       config_snapshot=config_snapshot)
             except Exception as exc:  # noqa: BLE001 — 兜住，别让线程静默死掉
+                if task_id:
+                    try:
+                        rt.store.set_task_status(task_id, "failed")
+                    except Exception:
+                        pass
                 # 事件名跟 AG-UI 家族一致（大写）—— 前端按大小写精确匹配，
                 # 这里写小写 run.error 的话前端的 case 'RUN_ERROR' 永远匹配不上。
-                self.bus.publish("RUN_ERROR", error=f"{type(exc).__name__}: {exc}")
+                self.bus.publish(
+                    "RUN_ERROR", error=f"{type(exc).__name__}: {exc}", _owner_id=owner_id
+                )
             finally:
                 self._busy = False
                 # 明确告诉控制面这轮结束了：它据此清掉"崩溃时补跑"的记录
-                self.bus.publish("RUN_FINISHED")
+                self.bus.publish("RUN_FINISHED", _owner_id=owner_id)
 
         # 先登记「有任务要跑」再起线程 ——
         # 从现在到 run() 真正开跑之间有个窗口（建 task、查配置、拼提示词、连模型），
         # 用户在这个窗口点「停止」也得算数。
         # 之前这段窗口里内核认为「没有任务在跑」，那一下停止直接被丢掉。
-        rt.mark_run_pending()
+        rt.mark_run_pending(task_id=task_id, owner_id=owner_id)
         threading.Thread(target=_run, name="oryx-agent-run", daemon=True).start()
-        return {"status": "started", "resumed": bool(resume_task_id)}
+        return {"status": "started", "resumed": bool(resume_task_id), "task_id": task_id}
 
     def chat_busy(self) -> bool:
         return self._busy
 
-    def chat_cancel(self) -> dict[str, Any]:
+    def chat_cancel(
+        self, task_id: str | None = None, owner_id: str | None = None,
+    ) -> dict[str, Any]:
         """中止正在跑的任务（用户点「停止」）。"""
-        return self.runtime.cancel()
+        return self.runtime.cancel(task_id=task_id, owner_id=owner_id)
 
     # ---------------------------------------------------------------- 检查点
 
@@ -322,10 +385,21 @@ class AgentDaemon:
 
         回退会真的改文件、删消息 —— 所以要发事件通知前端刷新，
         否则界面还显示着已经退掉的那些回答。
+
+        **运行中不许回退**：这一轮可能正在写文件，边写边退会把内容写乱。
+        只拦目标会话自己的运行，别的会话在跑不影响这里。
         """
+        cp = self.runtime.store.get_checkpoint(checkpoint)
+        if cp:
+            task_id = str(cp.get("task_id") or "")
+            if self.runtime.is_task_running(task_id):
+                return {
+                    "ok": False,
+                    "content": "这个会话正在运行，先停止或等它结束再回退",
+                }
         result = self.runtime.checkpoints.rewind(checkpoint, scope)
         if result.get("ok"):
-            cp = self.runtime.store.get_checkpoint(checkpoint)
+            cp = cp or self.runtime.store.get_checkpoint(checkpoint)
             task_id = str(cp.get("task_id")) if cp else ""
             self.bus.publish(
                 "checkpoint.rewound",
@@ -915,39 +989,44 @@ class AgentDaemon:
 
     # ---------------------------------------------------------------- 团队
 
-    def team_list(self) -> list[dict[str, Any]]:
+    def team_list(self, owner_id: str | None = None) -> list[dict[str, Any]]:
         rt = self.runtime
-        return [{**t, "thread": rt.teams.thread(t["name"], 12)} for t in rt.teams.list()]
+        return [
+            {**t, "thread": rt.teams.thread(t["name"], 12, owner_id)}
+            for t in rt.teams.list(owner_id)
+        ]
 
-    def team_get(self, name: str) -> dict[str, Any] | None:
+    def team_get(self, name: str, owner_id: str | None = None) -> dict[str, Any] | None:
         rt = self.runtime
         team = rt.teams.get(name)
-        return {**team.to_dict(), "thread": rt.teams.thread(name, 50)} if team else None
+        return {**team.to_dict(owner_id), "thread": rt.teams.thread(name, 50, owner_id)} if team else None
 
-    def team_create(self, name: str, members: Any, goal: str) -> dict[str, Any]:
+    def team_create(self, name: str, members: Any, goal: str, owner_id: str | None = None) -> dict[str, Any]:
         rt = self.runtime
         known = set(rt.agents.agents)
-        team, err = rt.teams.create(name, members, goal, known_agents=known)
+        team, err = rt.teams.create(name, members, goal, known_agents=known, owner_id=owner_id)
         if team is None:
             raise ValueError(err)
-        rt.bus.publish("team.created", team=team.to_dict())
+        rt.bus.publish("team.created", team=team.to_dict(owner_id), _owner_id=owner_id)
         return {"ok": True, "message": f"已建团队「{team.name}」，成员：{team.roles()}",
-                "team": team.to_dict()}
+                "team": team.to_dict(owner_id)}
 
-    def team_add_member(self, team: str, agent: str, role: str) -> dict[str, Any]:
+    def team_add_member(
+        self, team: str, agent: str, role: str, owner_id: str | None = None
+    ) -> dict[str, Any]:
         rt = self.runtime
         if agent not in set(rt.agents.agents):
             raise ValueError(f"没有这个子 Agent：{agent}")
-        ok, err = rt.teams.add_member(team, agent, role)
+        ok, err = rt.teams.add_member(team, agent, role, owner_id)
         if not ok:
             raise ValueError(err)
         obj = rt.teams.get(team)
-        rt.bus.publish("team.updated", team=obj.to_dict() if obj else {})
+        rt.bus.publish("team.updated", team=obj.to_dict(owner_id) if obj else {}, _owner_id=owner_id)
         return {"ok": True, "message": f"{agent} 已加入「{team}」，成员：{obj.roles() if obj else ''}"}
 
-    def team_remove_member(self, team: str, agent: str) -> dict[str, Any]:
+    def team_remove_member(self, team: str, agent: str, owner_id: str | None = None) -> dict[str, Any]:
         """把成员移出团队。真正的逻辑在 runtime 那边（它才持有 teams）。"""
-        return self.runtime.team_remove_member(team, agent)
+        return self.runtime.team_remove_member(team, agent, owner_id)
 
     def team_update(
         self,
@@ -956,29 +1035,45 @@ class AgentDaemon:
         goal: Any,
         member: str,
         role: Any,
+        owner_id: str | None = None,
     ) -> dict[str, Any]:
         """改团队的名字 / 目标 / 某个成员的分工。"""
-        return self.runtime.team_update(team, new_name, goal, member, role)
+        return self.runtime.team_update(team, new_name, goal, member, role, owner_id)
 
-    def team_send(self, team: str, to: str, content: str) -> dict[str, Any]:
+    def team_save(
+        self,
+        team: str,
+        new_name: str = "",
+        goal: Any = None,
+        members: Any = None,
+        owner_id: str | None = None,
+    ) -> dict[str, Any]:
+        """整体保存团队定义。控制面发一次 IPC，内核一次校验一次落地。"""
+        return self.runtime.team_save(team, new_name, goal, members, owner_id)
+
+    def team_send(self, team: str, to: str, content: str, owner_id: str | None = None) -> dict[str, Any]:
         rt = self.runtime
-        msg, err = rt.teams.post(team, "main", str(to), content)
+        msg, err = rt.teams.post(team, "main", str(to), content, owner_id)
         if msg is None:
             raise ValueError(err)
-        rt.bus.publish("team.message", team=team, message=msg.to_dict())
+        rt.bus.publish("team.message", team=team, message=msg.to_dict(), _owner_id=owner_id)
         if to in ("broadcast", "all"):
             return {"ok": True, "message": f"已广播给「{team}」全体成员"}
         return {"ok": True,
                 "message": f"已投递消息给 {to}（内容未执行，用 team_dispatch 才会真的开工）"}
 
-    def team_dispatch(self, team: str, agent: str) -> dict[str, Any]:
-        result = self.runtime.registry["team_dispatch"].fn(team=str(team), agent=str(agent))
+    def team_dispatch(self, team: str, agent: str, owner_id: str | None = None) -> dict[str, Any]:
+        result = self.runtime.registry["team_dispatch"].fn(
+            team=str(team), agent=str(agent), owner_id=owner_id
+        )
         if not result.get("ok"):
             raise ValueError(str(result.get("content", "派活失败")))
         return {"ok": True, "content": result.get("content", "")}
 
-    def team_inbox(self, team: str, agent: str) -> list[dict[str, Any]]:
-        return [m.to_dict() for m in self.runtime.teams.inbox(str(team), str(agent), mark_read=False)]
+    def team_inbox(self, team: str, agent: str, owner_id: str | None = None) -> list[dict[str, Any]]:
+        return [m.to_dict() for m in self.runtime.teams.inbox(
+            str(team), str(agent), mark_read=False, owner_id=owner_id
+        )]
 
     # ---------------------------------------------------------------- 工作流
 

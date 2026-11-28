@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..agentlink import AgentLink
 from ..ipc import IpcError
-from ._common import is_kernel_unready
+from ._common import map_ipc_error
 
 router = APIRouter(prefix="/api/workflows", tags=["工作流"])
 
@@ -22,16 +24,25 @@ RUN_TIMEOUT = 3600.0
 
 
 class WorkflowRunRequest(BaseModel):
-    plan: dict
-    args: dict | None = None
+    plan: dict[str, Any]
+    args: dict[str, Any] | None = None
+
+
+class TemplateRunRequest(BaseModel):
+    """按模板运行。**body 允许整个省略**（老前端传 `{}`）。
+
+    以前是裸 dict 且 `| None`：body 传字符串 / 数组时 `(req or {}).get`
+    会 AttributeError → 500；现在契约层挡成 422。
+    """
+    args: dict[str, Any] | None = None
 
 
 class WorkflowTemplateRequest(BaseModel):
     id: str = ""
     name: str = ""
     description: str = ""
-    plan: dict
-    args: dict | None = None
+    plan: dict[str, Any]
+    args: dict[str, Any] | None = None
     created_at: float | None = None
     # 别名：除了 id 与名字，还能用别名取这份模板。
     # 抄 Marvis 的模板别名 —— 用户能记住「巡检」比记住「tpl_a3f9…」容易得多。
@@ -126,7 +137,7 @@ def delete_template(agent: AgentLink, template_id: str) -> dict:
     return {"deleted": template_id}
 
 
-def run_template(agent: AgentLink, template_id: str, args: dict | None = None) -> dict:
+def run_template(agent: AgentLink, template_id: str, args: dict[str, Any] | None = None) -> dict:
     """按模板跑。阻塞语义与直接发起一致 —— 内核一次只能跑一个编排。"""
     return _call(agent, "workflow.template.run", template_id=template_id,
                  args=args or {}, timeout=RUN_TIMEOUT)
@@ -158,13 +169,9 @@ def _call(agent: AgentLink, method: str, **params):
 
 def _map(exc: IpcError) -> HTTPException:
     text = _clean(str(exc))
-    # 「内核未就绪」是 503 —— 服务端依赖没就绪，不是请求写错了。
-    # 规则与 _common.rpc_failure 一致，判据也共用同一个函数。
-    if is_kernel_unready(text):
-        return HTTPException(503, text)
-    if "没有这次运行" in text or "没有正在跑" in text or "没有这个模板" in text:
-        return HTTPException(404, text)
-    return HTTPException(400, text)
+    # 状态码规则统一走 _common.map_ipc_error；本域只追加两条特有的
+    # 「资源不存在」文案（「没有这个模板」已被公共判据「没有这个」覆盖）。
+    return map_ipc_error(text, not_found=("没有这次运行", "没有正在跑"))
 
 
 def _clean(text: str) -> str:
@@ -229,11 +236,11 @@ def register(app, agent: AgentLink) -> None:
         return JSONResponse(await asyncio.to_thread(delete_template, agent, template_id))
 
     @router.post("/templates/{template_id}/run")
-    async def _tpl_run(template_id: str, req: dict | None = None):
+    async def _tpl_run(template_id: str, req: TemplateRunRequest | None = None):
         # 阻塞语义：编排要跑几分钟，和 POST /run 一样用线程池兜住，
         # 否则会独占事件循环 —— SSE 发不出去，"运行中"视图就看不见了
         return JSONResponse(
-            await asyncio.to_thread(run_template, agent, template_id, (req or {}).get("args"))
+            await asyncio.to_thread(run_template, agent, template_id, req.args if req else None)
         )
 
     @router.get("/{run_id}")

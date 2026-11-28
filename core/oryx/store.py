@@ -36,8 +36,38 @@ CREATE TABLE IF NOT EXISTS tasks (
     provider    TEXT,
     status      TEXT NOT NULL,
     created_at  REAL NOT NULL,
-    updated_at  REAL NOT NULL
+    updated_at  REAL NOT NULL,
+    owner_id    TEXT,
+    agent_id    TEXT,
+    expert_id   TEXT,
+    config_snapshot TEXT
 );
+
+-- Shared platform definitions. creator_id is NULL for built-in or legacy assets.
+CREATE TABLE IF NOT EXISTS shared_assets (
+    kind       TEXT NOT NULL,
+    asset_id   TEXT NOT NULL,
+    creator_id TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY(kind, asset_id)
+);
+
+-- 本地多用户账户。平台级能力仍由共享目录管理；会话通过 tasks.owner_id 隔离。
+CREATE TABLE IF NOT EXISTS users (
+    id            TEXT PRIMARY KEY,
+    username      TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at    REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS login_sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_login_sessions_expiry ON login_sessions(expires_at);
 
 CREATE TABLE IF NOT EXISTS steps (
     id          TEXT PRIMARY KEY,
@@ -52,6 +82,12 @@ CREATE TABLE IF NOT EXISTS steps (
     error       TEXT,
     started_at  REAL,
     ended_at    REAL,
+    -- 下面三列原来只在 step.done / step.failed 的 SSE 事件里，
+    -- 页面一刷新就丢：失败分类变回笼统的「失败」、只读自证和产物路径消失。
+    -- 落库后「执行步骤」面板在刷新前后显示一致。
+    error_class   TEXT,
+    artifact_path TEXT,
+    mutated       INTEGER,
     FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
 
@@ -102,7 +138,11 @@ CREATE TABLE IF NOT EXISTS automations (
     jitter_ratio  REAL DEFAULT 0.1,
     next_run_at   REAL,
     last_run_at   REAL,
-    created_at    REAL NOT NULL
+    created_at    REAL NOT NULL,
+    owner_id      TEXT,
+    retry_count   INTEGER DEFAULT 0,
+    retrying      INTEGER DEFAULT 0,
+    run_count     INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_automations_next ON automations(next_run_at);
 
@@ -123,7 +163,11 @@ CREATE TABLE IF NOT EXISTS automation_runs (
     task_id       TEXT,               -- 对应的会话 id（有的话）
     started_at    REAL NOT NULL,
     ended_at      REAL NOT NULL,
-    duration_ms   INTEGER DEFAULT 0
+    duration_ms   INTEGER DEFAULT 0,
+    owner_id      TEXT,
+    attempt       INTEGER DEFAULT 1,
+    parent_run_id TEXT,
+    manual_retry  INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_automation_runs ON automation_runs(automation_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_automation_runs_time ON automation_runs(started_at);
@@ -134,7 +178,8 @@ CREATE TABLE IF NOT EXISTS teams (
     name        TEXT NOT NULL UNIQUE,
     goal        TEXT,
     members     TEXT,
-    created_at  REAL NOT NULL
+    created_at  REAL NOT NULL,
+    owner_id    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS team_messages (
@@ -144,7 +189,8 @@ CREATE TABLE IF NOT EXISTS team_messages (
     recipient   TEXT NOT NULL,
     content     TEXT NOT NULL,
     read        INTEGER DEFAULT 0,
-    ts          REAL NOT NULL
+    ts          REAL NOT NULL,
+    owner_id    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_team_messages ON team_messages(team_id, recipient, ts);
 
@@ -241,6 +287,7 @@ CREATE TABLE IF NOT EXISTS usage (
     id            TEXT PRIMARY KEY,
     ts            REAL NOT NULL,
     task_id       TEXT,
+    owner_id      TEXT,
     provider      TEXT,
     model         TEXT,
     input_tokens  INTEGER DEFAULT 0,
@@ -256,7 +303,8 @@ CREATE TABLE IF NOT EXISTS memory (
     text        TEXT NOT NULL,
     tags        TEXT,
     created_at  REAL NOT NULL,
-    updated_at  REAL NOT NULL
+    updated_at  REAL NOT NULL,
+    owner_id    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_memory_ts ON memory(updated_at);
 """
@@ -335,8 +383,29 @@ class Store:
         # 「每个对话可以有一个自己的团队」—— 团队是全局的，会话是私人的，
         # 靠这一列把两者挂起来。
         self._ensure_columns(self.conv_path, "tasks", {"title": "TEXT", "team": "TEXT"})
+        self._ensure_columns(self.conv_path, "tasks", {"owner_id": "TEXT"})
+        self._ensure_columns(self.conv_path, "tasks", {
+            "agent_id": "TEXT", "expert_id": "TEXT", "config_snapshot": "TEXT",
+        })
+        self._ensure_columns(self.conv_path, "automations", {
+            "owner_id": "TEXT", "retry_count": "INTEGER DEFAULT 0",
+            "retrying": "INTEGER DEFAULT 0", "run_count": "INTEGER DEFAULT 0",
+        })
+        self._ensure_columns(self.conv_path, "automation_runs", {
+            "owner_id": "TEXT", "attempt": "INTEGER DEFAULT 1",
+            "parent_run_id": "TEXT", "manual_retry": "INTEGER DEFAULT 0",
+        })
+        self._ensure_columns(self.conv_path, "teams", {"owner_id": "TEXT"})
+        self._ensure_columns(self.conv_path, "team_messages", {"owner_id": "TEXT"})
+        self._ensure_columns(self.metrics_path, "usage", {"owner_id": "TEXT"})
+        self._ensure_columns(self.memory_path, "memory", {"owner_id": "TEXT"})
         # 检查点记录当时的步骤数 —— 回退对话时要一起裁掉那些执行记录。
         self._ensure_columns(self.conv_path, "checkpoints", {"step_count": "INTEGER DEFAULT 0"})
+        # 步骤详情增强字段：老库的 steps 表没有这三列，幂等补上。
+        # 新建库走上面的 CREATE TABLE，这里只管既有数据文件。
+        self._ensure_columns(self.conv_path, "steps", {
+            "error_class": "TEXT", "artifact_path": "TEXT", "mutated": "INTEGER",
+        })
 
     @staticmethod
     def _ensure_columns(path: Path, table: str, columns: dict[str, str]) -> None:
@@ -392,25 +461,208 @@ class Store:
                     dst = self._connect(target)
                     cols = [c[1] for c in dst.execute(f"PRAGMA table_info({table})")]
                     placeholders = ",".join("?" * len(cols))
+                    source_cols = set(rows[0].keys())
                     with dst:
                         dst.executemany(
                             f"INSERT OR IGNORE INTO {table}({','.join(cols)}) VALUES({placeholders})",
-                            [tuple(r[c] for c in cols) for r in rows],
+                            [tuple(r[c] if c in source_cols else None for c in cols) for r in rows],
                         )
                     dst.close()
                 conn.execute(f"DROP TABLE {table}")
 
+    # ---------- accounts ----------
+    def user_count(self) -> int:
+        with self._conn() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+
+    def create_user(self, username: str, password_hash: str) -> dict[str, Any]:
+        """Create an account and attach pre-account local sessions to the first account."""
+        user_id = uuid.uuid4().hex
+        now = time.time()
+        with self._lock, self._conn() as conn:
+            exists = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+            conn.execute(
+                "INSERT INTO users(id, username, password_hash, created_at) VALUES(?,?,?,?)",
+                (user_id, username, password_hash, now),
+            )
+            # A single-user installation may already contain local history. Claim it once,
+            # atomically with first-account creation; later accounts never inherit it.
+            first_user = not exists
+            if first_user:
+                conn.execute("UPDATE tasks SET owner_id=? WHERE owner_id IS NULL", (user_id,))
+                task_ids = [r[0] for r in conn.execute(
+                    "SELECT id FROM tasks WHERE owner_id=?", (user_id,)
+                ).fetchall()]
+            else:
+                task_ids = []
+        if task_ids:
+            with self._lock, self._metrics_conn() as conn:
+                conn.executemany(
+                    "UPDATE usage SET owner_id=? WHERE task_id=? AND owner_id IS NULL",
+                    [(user_id, task_id) for task_id in task_ids],
+                )
+        if first_user:
+            with self._lock, self._memory_conn() as conn:
+                conn.execute(
+                    "UPDATE memory SET owner_id=? WHERE owner_id IS NULL", (user_id,)
+                )
+        return {"id": user_id, "username": username, "created_at": now}
+
+    def user_by_username(self, username: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT id, username, password_hash, created_at FROM users WHERE username=?",
+                (username,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def user_by_id(self, user_id: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT id, username, created_at FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def create_login_session(self, token_hash: str, user_id: str, expires_at: float) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT INTO login_sessions(token_hash, user_id, created_at, expires_at)"
+                " VALUES(?,?,?,?)",
+                (token_hash, user_id, time.time(), expires_at),
+            )
+            conn.execute("DELETE FROM login_sessions WHERE expires_at<=?", (time.time(),))
+
+    def user_for_login_session(self, token_hash: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT u.id, u.username, u.created_at FROM login_sessions s"
+                " JOIN users u ON u.id=s.user_id"
+                " WHERE s.token_hash=? AND s.expires_at>?",
+                (token_hash, time.time()),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def delete_login_session(self, token_hash: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM login_sessions WHERE token_hash=?", (token_hash,))
+
+    # ---------- accounts: 改密码 ----------
+    def user_credentials(self, user_id: str) -> dict[str, Any] | None:
+        """带 password_hash 的用户记录，只给改密码校验用。
+
+        `user_by_id()` 刻意不 SELECT 密码散列（它会作为 `/api/auth/me` 的
+        返回体下发），这里单独开一个入口，避免为了改密码把 hash 泄进接口。
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT id, username, password_hash, created_at FROM users WHERE id=?",
+                (user_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def update_password_hash(self, user_id: str, password_hash: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET password_hash=? WHERE id=?", (password_hash, user_id)
+            )
+            return cur.rowcount > 0
+
+    def delete_login_sessions_except(self, user_id: str, keep_token_hash: str) -> int:
+        """保留当前会话，注销该账号的其它所有登录态；返回注销条数。
+
+        只按 user_id 过滤，不会碰到别的账号；`keep_token_hash` 为空串时
+        会删掉该账号全部会话（调用方只在已登录时走到这里）。
+        """
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM login_sessions WHERE user_id=? AND token_hash<>?",
+                (user_id, keep_token_hash),
+            )
+            return int(cur.rowcount or 0)
+
     # ---------- tasks ----------
-    def create_task(self, goal: str, mode: str, provider: str) -> str:
+    def create_task(
+        self, goal: str, mode: str, provider: str, owner_id: str | None = None,
+        agent_id: str | None = None, expert_id: str | None = None,
+        config_snapshot: dict[str, Any] | None = None,
+    ) -> str:
         task_id = uuid.uuid4().hex[:12]
         now = time.time()
         with self._lock, self._conn() as conn:
             conn.execute(
-                "INSERT INTO tasks(id, goal, mode, provider, status, created_at, updated_at)"
-                " VALUES(?,?,?,?,?,?,?)",
-                (task_id, goal, mode, provider, "running", now, now),
+                "INSERT INTO tasks(id, goal, mode, provider, status, created_at, updated_at, owner_id,"
+                " agent_id, expert_id, config_snapshot) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (task_id, goal, mode, provider, "running", now, now, owner_id,
+                 agent_id, expert_id,
+                 json.dumps(config_snapshot, ensure_ascii=False) if config_snapshot is not None else None),
             )
         return task_id
+
+    def create_empty_session(self, owner_id: str | None = None) -> str:
+        """新建一条**空会话**：先开个会话，第一句话稍后再发。
+
+        为什么不能复用 create_task()
+        ---------------------------
+        `create_task()` 是「发起一轮对话」用的，它强制 `status='running'`
+        并塞入 goal / mode / provider。空会话还没跑过，标成 running 会让
+        界面禁止发送、列表显示「进行中」。而内核续聊本来就会把状态改成
+        running（`loop.py:2268`），不需要我们预先置位。
+
+        `status='idle'` 是新增的一态，列表与详情的状态文案都要跟着补。
+        `config_snapshot` 留空 —— 首次发消息时 `chat.py` 才把当时的配置
+        固化下来，这正是空会话想要的：不提前锁死一份还没选过的配置。
+        """
+        task_id = uuid.uuid4().hex[:12]
+        now = time.time()
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT INTO tasks(id, goal, mode, provider, status, created_at, updated_at, owner_id)"
+                " VALUES(?,?,?,?,?,?,?,?)",
+                (task_id, "", "", "", "idle", now, now, owner_id),
+            )
+        return task_id
+
+    def set_task_config(
+        self, task_id: str, agent_id: str | None, expert_id: str | None,
+        config_snapshot: dict[str, Any], *, only_if_empty: bool = True,
+    ) -> bool:
+        """Persist a run's selected definitions once so later turns reuse them."""
+        condition = " AND (config_snapshot IS NULL OR config_snapshot='')" if only_if_empty else ""
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE tasks SET agent_id=?, expert_id=?, config_snapshot=?, updated_at=? WHERE id=?" + condition,
+                (agent_id, expert_id, json.dumps(config_snapshot, ensure_ascii=False), time.time(), task_id),
+            )
+        return cur.rowcount > 0
+
+    def shared_asset(self, kind: str, asset_id: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT kind, asset_id, creator_id, created_at, updated_at FROM shared_assets"
+                " WHERE kind=? AND asset_id=?", (kind, asset_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def claim_shared_asset(self, kind: str, asset_id: str, creator_id: str | None) -> bool:
+        """Record creation ownership; never silently transfer an existing asset."""
+        now = time.time()
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO shared_assets(kind, asset_id, creator_id, created_at, updated_at)"
+                " VALUES(?,?,?,?,?)", (kind, asset_id, creator_id, now, now),
+            )
+        return cur.rowcount > 0
+
+    def touch_shared_asset(self, kind: str, asset_id: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "UPDATE shared_assets SET updated_at=? WHERE kind=? AND asset_id=?",
+                (time.time(), kind, asset_id),
+            )
+
+    def delete_shared_asset(self, kind: str, asset_id: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM shared_assets WHERE kind=? AND asset_id=?", (kind, asset_id))
 
     def set_task_status(self, task_id: str, status: str) -> None:
         with self._lock, self._conn() as conn:
@@ -419,53 +671,103 @@ class Store:
                 (status, time.time(), task_id),
             )
 
-    def get_task(self, task_id: str) -> dict[str, Any] | None:
-        with self._conn() as conn:
-            row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-        return dict(row) if row else None
+    def set_task_provider(self, task_id: str, provider: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "UPDATE tasks SET provider=?, updated_at=? WHERE id=?",
+                (provider, time.time(), task_id),
+            )
 
-    def recent_tasks(self, limit: int = 20) -> list[dict[str, Any]]:
+    def get_task(self, task_id: str, owner_id: str | None = None) -> dict[str, Any] | None:
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?", (limit,)
-            ).fetchall()
-        return [dict(r) for r in rows]
+            if owner_id is None:
+                row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM tasks WHERE id=? AND owner_id=?", (task_id, owner_id)
+                ).fetchone()
+        if not row:
+            return None
+        task = dict(row)
+        raw_snapshot = task.get("config_snapshot")
+        if raw_snapshot:
+            try:
+                task["config_snapshot"] = json.loads(raw_snapshot)
+            except (TypeError, ValueError):
+                task["config_snapshot"] = None
+        return task
+
+    def recent_tasks(self, limit: int = 20, owner_id: str | None = None) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            if owner_id is None:
+                rows = conn.execute(
+                    "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?", (limit,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM tasks WHERE owner_id=? ORDER BY created_at DESC LIMIT ?",
+                    (owner_id, limit),
+                ).fetchall()
+        out = [dict(r) for r in rows]
+        for task in out:
+            task.pop("owner_id", None)
+        return out
 
     # ---------- 会话（= task 视角）----------
-    def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_sessions(self, limit: int = 50, owner_id: str | None = None,
+                      offset: int = 0, query: str | None = None) -> list[dict[str, Any]]:
         """会话列表：首条用户消息当标题，附带消息数与步骤数。
 
         排序按 **updated_at DESC**（最近动过的排最前），不是 created_at。
         续接对话会更新 updated_at —— 用户刚聊完的那条应该浮到最上面，
         按创建时间排的话老会话会一直压着新会话。
 
-        标题优先用用户改过的名字（tasks.title），没有就退回 goal 摘要。
+        标题优先用用户改过的名字（tasks.title），没有就退回 goal 摘要；
+        空会话（还没发过第一句话）两者皆空，给个可读的「新会话」。
+
+        分页与搜索
+        ----------
+        `offset / limit` 只切「这一页」；`query` 在 **SQL 里** 过滤全部会话，
+        不是让前端在已经加载的那一页里筛 —— 否则三个月前的会话永远搜不到。
+        用 `instr(lower(...), lower(?))` 而不是 LIKE：用户搜 `%` 或 `_`
+        不该被当成通配符把整个库捞出来。
         """
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        needle = (query or "").strip().lower()
+        where = "(? IS NULL OR t.owner_id=?)"
+        params: list[Any] = [owner_id, owner_id]
+        if needle:
+            where += (
+                " AND (instr(lower(COALESCE(t.title,'')), ?) > 0"
+                " OR instr(lower(COALESCE(t.goal,'')), ?) > 0)"
+            )
+            params.extend([needle, needle])
+        params.extend([limit, offset])
         with self._conn() as conn:
             rows = conn.execute(
-                """
-                SELECT t.id, t.goal, t.title, t.status, t.mode, t.provider,
-                       t.created_at, t.updated_at,
-                       (SELECT COUNT(*) FROM messages m WHERE m.task_id = t.id) AS msg_count,
-                       (SELECT COUNT(*) FROM steps s WHERE s.task_id = t.id) AS step_count,
-                       (SELECT COUNT(*) FROM todos d WHERE d.task_id = t.id AND d.status != 'done') AS todo_open
-                FROM tasks t
-                ORDER BY t.updated_at DESC, t.created_at DESC, t.rowid DESC
-                LIMIT ?
-                """,
-                (limit,),
+                "SELECT t.id, t.goal, t.title, t.status, t.mode, t.provider,"
+                " t.agent_id, t.expert_id, t.created_at, t.updated_at,"
+                " (SELECT COUNT(*) FROM messages m WHERE m.task_id = t.id) AS msg_count,"
+                " (SELECT COUNT(*) FROM steps s WHERE s.task_id = t.id) AS step_count,"
+                " (SELECT COUNT(*) FROM todos d WHERE d.task_id = t.id AND d.status != 'done') AS todo_open"
+                " FROM tasks t"
+                " WHERE " + where +
+                " ORDER BY t.updated_at DESC, t.created_at DESC, t.rowid DESC"
+                " LIMIT ? OFFSET ?",
+                params,
             ).fetchall()
         out = []
         for row in rows:
             item = dict(row)
             goal = (item.get("goal") or "").strip().replace("\n", " ")
             named = (item.get("title") or "").strip()
-            item["title"] = named or (goal[:40] + ("…" if len(goal) > 40 else ""))
+            item["title"] = named or (goal[:40] + ("…" if len(goal) > 40 else "")) or "新会话"
             item["renamed"] = bool(named)
             out.append(item)
         return out
 
-    def session_stats(self) -> dict[str, int]:
+    def session_stats(self, owner_id: str | None = None) -> dict[str, int]:
         """会话计数：总数 / 进行中 / 今日。
 
         给大屏用 —— 「一共跑过多少轮、现在有几个在跑、今天动了多少」。
@@ -487,8 +789,8 @@ class Store:
                 "SELECT COUNT(*) AS total,"
                 " COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0) AS active,"
                 " COALESCE(SUM(CASE WHEN updated_at >= ? THEN 1 ELSE 0 END),0) AS today"
-                " FROM tasks",
-                (start_of_day,),
+                " FROM tasks WHERE (? IS NULL OR owner_id=?)",
+                (start_of_day, owner_id, owner_id),
             ).fetchone()
         return {
             "total": int(row["total"]),
@@ -496,7 +798,7 @@ class Store:
             "today": int(row["today"]),
         }
 
-    def set_session_team(self, task_id: str, team: str) -> bool:
+    def set_session_team(self, task_id: str, team: str, owner_id: str | None = None) -> bool:
         """给会话挂一个团队（传空串 = 摘掉）。
 
         团队是全局的（/api/teams），会话是私人的 —— 这一列把两者挂起来：
@@ -506,22 +808,28 @@ class Store:
         if len(name) > 60:
             name = name[:60]
         with self._lock, self._conn() as conn:
-            exists = conn.execute("SELECT 1 FROM tasks WHERE id=?", (task_id,)).fetchone()
+            exists = conn.execute(
+                "SELECT 1 FROM tasks WHERE id=? AND (? IS NULL OR owner_id=?)",
+                (task_id, owner_id, owner_id),
+            ).fetchone()
             if not exists:
                 return False
             conn.execute(
-                "UPDATE tasks SET team=?, updated_at=? WHERE id=?",
-                (name, time.time(), task_id),
+                "UPDATE tasks SET team=?, updated_at=? WHERE id=? AND (? IS NULL OR owner_id=?)",
+                (name, time.time(), task_id, owner_id, owner_id),
             )
         return True
 
-    def session_team(self, task_id: str) -> str:
+    def session_team(self, task_id: str, owner_id: str | None = None) -> str:
         """这个会话挂着哪个团队（没有就是空串）。"""
         with self._conn() as conn:
-            row = conn.execute("SELECT team FROM tasks WHERE id=?", (task_id,)).fetchone()
+            row = conn.execute(
+                "SELECT team FROM tasks WHERE id=? AND (? IS NULL OR owner_id=?)",
+                (task_id, owner_id, owner_id),
+            ).fetchone()
         return (row["team"] if row else "") or ""
 
-    def rename_session(self, task_id: str, title: str) -> bool:
+    def rename_session(self, task_id: str, title: str, owner_id: str | None = None) -> bool:
         """给会话改个名字。
 
         名字存在 tasks.title 列；清空（传空串）就退回用 goal 摘要当标题。
@@ -531,20 +839,24 @@ class Store:
         if len(name) > 60:
             name = name[:60]
         with self._lock, self._conn() as conn:
-            exists = conn.execute("SELECT 1 FROM tasks WHERE id=?", (task_id,)).fetchone()
+            exists = conn.execute(
+                "SELECT 1 FROM tasks WHERE id=? AND (? IS NULL OR owner_id=?)",
+                (task_id, owner_id, owner_id),
+            ).fetchone()
             if not exists:
                 return False
             conn.execute(
-                "UPDATE tasks SET title=?, updated_at=? WHERE id=?",
-                (name or None, time.time(), task_id),
+                "UPDATE tasks SET title=?, updated_at=? WHERE id=? AND (? IS NULL OR owner_id=?)",
+                (name or None, time.time(), task_id, owner_id, owner_id),
             )
         return True
 
-    def session_detail(self, task_id: str) -> dict[str, Any] | None:
-        task = self.get_task(task_id)
+    def session_detail(self, task_id: str, owner_id: str | None = None) -> dict[str, Any] | None:
+        task = self.get_task(task_id, owner_id)
         if task is None:
             return None
         named = (task.get("title") or "").strip()
+        task.pop("owner_id", None)
         return {
             "task": task,
             "title": named,
@@ -556,18 +868,45 @@ class Store:
             "usage": self.usage_for_task(task_id),
         }
 
-    def delete_session(self, task_id: str) -> bool:
+    def delete_session(self, task_id: str, owner_id: str | None = None) -> bool:
         with self._lock, self._conn() as conn:
-            exists = conn.execute("SELECT 1 FROM tasks WHERE id=?", (task_id,)).fetchone()
+            exists = conn.execute(
+                "SELECT 1 FROM tasks WHERE id=? AND (? IS NULL OR owner_id=?)",
+                (task_id, owner_id, owner_id),
+            ).fetchone()
             if not exists:
                 return False
             # usage 在统计域，跨库删除，所以不跟上面这批表一起清
             for table in ("messages", "steps", "audit", "todos"):
                 conn.execute(f"DELETE FROM {table} WHERE task_id=?", (task_id,))
+            # 检查点是「检查点回退」模块加进来的 —— 不跟着删会留下孤儿：
+            # 会话已经没了，POST /api/checkpoints/{id}/rewind 却还能拿这个点
+            # 去还原文件、裁剪消息（loop 里那些 DELETE 会打到不存在的 task）。
+            # 先删子表（checkpoint_files 有外键指向 checkpoints），再删父表。
+            conn.execute(
+                "DELETE FROM checkpoint_files WHERE checkpoint_id IN "
+                "(SELECT id FROM checkpoints WHERE task_id=?)",
+                (task_id,),
+            )
+            conn.execute("DELETE FROM checkpoints WHERE task_id=?", (task_id,))
             conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
         with self._metrics_conn() as conn:
             conn.execute("DELETE FROM usage WHERE task_id=?", (task_id,))
         return True
+
+    def checkpoint_task_id(self, checkpoint_id: str) -> str | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT task_id FROM checkpoints WHERE id=?", (checkpoint_id,)
+            ).fetchone()
+        return str(row[0]) if row else None
+
+    def task_id_for_step(self, step_id: str) -> str | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT task_id FROM steps WHERE id=?", (step_id,)
+            ).fetchone()
+        return str(row[0]) if row else None
 
     def usage_for_task(self, task_id: str) -> dict[str, int]:
         with self._metrics_conn() as conn:
@@ -664,16 +1003,34 @@ class Store:
         return step_id
 
     def finish_step(
-        self, step_id: str, state: str, result: Any = None, error: str | None = None
+        self,
+        step_id: str,
+        state: str,
+        result: Any = None,
+        error: str | None = None,
+        *,
+        error_class: str | None = None,
+        artifact_path: str | None = None,
+        mutated: bool | None = None,
     ) -> None:
+        """收尾一步。新增的三个字段只由内核在工具真正跑完时传，
+        其它「拒绝 / 未确认」路径不传 —— 那些步骤本来就没有结果、
+        没有产物，也不该显示「未改动」。
+
+        全部是 keyword-only：老调用点（包括测试）不用改。
+        """
         with self._lock, self._conn() as conn:
             conn.execute(
-                "UPDATE steps SET state=?, result=?, error=?, ended_at=? WHERE id=?",
+                "UPDATE steps SET state=?, result=?, error=?, ended_at=?,"
+                " error_class=?, artifact_path=?, mutated=? WHERE id=?",
                 (
                     state,
                     json.dumps(result, ensure_ascii=False) if result is not None else None,
                     error,
                     time.time(),
+                    error_class,
+                    artifact_path or None,
+                    None if mutated is None else int(bool(mutated)),
                     step_id,
                 ),
             )
@@ -802,14 +1159,17 @@ class Store:
         input_tokens: int = 0,
         output_tokens: int = 0,
     ) -> None:
+        task = self.get_task(task_id) if task_id else None
+        owner_id = (task or {}).get("owner_id")
         with self._lock, self._metrics_conn() as conn:
             conn.execute(
-                "INSERT INTO usage(id, ts, task_id, provider, model, input_tokens, output_tokens)"
-                " VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO usage(id, ts, task_id, owner_id, provider, model, input_tokens, output_tokens)"
+                " VALUES(?,?,?,?,?,?,?,?)",
                 (
                     uuid.uuid4().hex,
                     time.time(),
                     task_id,
+                    owner_id,
                     provider,
                     model,
                     int(input_tokens),
@@ -817,24 +1177,28 @@ class Store:
                 ),
             )
 
-    def usage_summary(self, since_hours: int = 24 * 30) -> dict[str, Any]:
+    def usage_summary(self, since_hours: int = 24 * 30,
+                      owner_id: str | None = None) -> dict[str, Any]:
         since = time.time() - since_hours * 3600
         with self._metrics_conn() as conn:
             total = conn.execute(
                 "SELECT COUNT(*) calls, COALESCE(SUM(input_tokens),0) inp,"
-                " COALESCE(SUM(output_tokens),0) outp FROM usage WHERE ts >= ?",
-                (since,),
+                " COALESCE(SUM(output_tokens),0) outp FROM usage"
+                " WHERE ts >= ? AND (? IS NULL OR owner_id=?)",
+                (since, owner_id, owner_id),
             ).fetchone()
             today = conn.execute(
                 "SELECT COUNT(*) calls, COALESCE(SUM(input_tokens),0) inp,"
-                " COALESCE(SUM(output_tokens),0) outp FROM usage WHERE ts >= ?",
-                (time.time() - 86400,),
+                " COALESCE(SUM(output_tokens),0) outp FROM usage"
+                " WHERE ts >= ? AND (? IS NULL OR owner_id=?)",
+                (time.time() - 86400, owner_id, owner_id),
             ).fetchone()
             by_model = conn.execute(
                 "SELECT provider, model, COUNT(*) calls,"
                 " COALESCE(SUM(input_tokens),0) inp, COALESCE(SUM(output_tokens),0) outp"
-                " FROM usage WHERE ts >= ? GROUP BY provider, model ORDER BY calls DESC",
-                (since,),
+                " FROM usage WHERE ts >= ? AND (? IS NULL OR owner_id=?)"
+                " GROUP BY provider, model ORDER BY calls DESC",
+                (since, owner_id, owner_id),
             ).fetchall()
         return {
             "window_hours": since_hours,
@@ -852,14 +1216,22 @@ class Store:
         }
 
     # ---------- memory ----------
-    def save_memory(self, text: str, tags: str = "") -> dict[str, Any]:
+    def save_memory(self, text: str, tags: str = "",
+                    owner_id: str | None = None) -> dict[str, Any]:
         now = time.time()
         memory_id = uuid.uuid4().hex[:10]
+        owner_id = self._memory_owner(owner_id)
         with self._lock, self._memory_conn() as conn:
             # 完全相同的内容不重复存，更新时间戳即可
-            existing = conn.execute(
-                "SELECT id FROM memory WHERE text = ?", (text.strip(),)
-            ).fetchone()
+            if owner_id is None:
+                existing = conn.execute(
+                    "SELECT id FROM memory WHERE text=? AND owner_id IS NULL", (text.strip(),)
+                ).fetchone()
+            else:
+                existing = conn.execute(
+                    "SELECT id FROM memory WHERE text=? AND owner_id=?",
+                    (text.strip(), owner_id),
+                ).fetchone()
             if existing:
                 conn.execute(
                     "UPDATE memory SET updated_at=?, tags=? WHERE id=?",
@@ -867,31 +1239,62 @@ class Store:
                 )
                 return {"id": existing["id"], "text": text, "deduped": True}
             conn.execute(
-                "INSERT INTO memory(id, text, tags, created_at, updated_at) VALUES(?,?,?,?,?)",
-                (memory_id, text.strip(), tags, now, now),
+                "INSERT INTO memory(id, text, tags, created_at, updated_at, owner_id)"
+                " VALUES(?,?,?,?,?,?)",
+                (memory_id, text.strip(), tags, now, now, owner_id),
             )
         return {"id": memory_id, "text": text, "deduped": False}
 
-    def search_memories(self, query: str = "", limit: int = 20) -> list[dict[str, Any]]:
+    def search_memories(self, query: str = "", limit: int = 20,
+                        owner_id: str | None = None) -> list[dict[str, Any]]:
+        owner_id = self._memory_owner(owner_id)
         with self._memory_conn() as conn:
             if query:
-                rows = conn.execute(
-                    "SELECT id, text, tags, updated_at FROM memory"
-                    " WHERE text LIKE ? OR tags LIKE ?"
-                    " ORDER BY updated_at DESC LIMIT ?",
-                    (f"%{query}%", f"%{query}%", limit),
-                ).fetchall()
+                if owner_id is None:
+                    rows = conn.execute(
+                        "SELECT id, text, tags, updated_at FROM memory"
+                        " WHERE (text LIKE ? OR tags LIKE ?)"
+                        " ORDER BY updated_at DESC LIMIT ?",
+                        (f"%{query}%", f"%{query}%", limit),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT id, text, tags, updated_at FROM memory"
+                        " WHERE (text LIKE ? OR tags LIKE ?) AND owner_id=?"
+                        " ORDER BY updated_at DESC LIMIT ?",
+                        (f"%{query}%", f"%{query}%", owner_id, limit),
+                    ).fetchall()
             else:
-                rows = conn.execute(
-                    "SELECT id, text, tags, updated_at FROM memory ORDER BY updated_at DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
+                if owner_id is None:
+                    rows = conn.execute(
+                        "SELECT id, text, tags, updated_at FROM memory"
+                        " ORDER BY updated_at DESC LIMIT ?", (limit,)
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT id, text, tags, updated_at FROM memory WHERE owner_id=?"
+                        " ORDER BY updated_at DESC LIMIT ?", (owner_id, limit)
+                    ).fetchall()
         return [dict(r) for r in rows]
 
-    def forget_memory(self, memory_id: str) -> bool:
+    def forget_memory(self, memory_id: str, owner_id: str | None = None) -> bool:
+        owner_id = self._memory_owner(owner_id)
         with self._lock, self._memory_conn() as conn:
-            cur = conn.execute("DELETE FROM memory WHERE id=?", (memory_id,))
+            if owner_id is None:
+                cur = conn.execute(
+                    "DELETE FROM memory WHERE id=? AND owner_id IS NULL", (memory_id,)
+                )
+            else:
+                cur = conn.execute(
+                    "DELETE FROM memory WHERE id=? AND owner_id=?", (memory_id, owner_id)
+                )
         return cur.rowcount > 0
+
+    def _memory_owner(self, owner_id: str | None) -> str | None:
+        """No-account installs keep legacy global memories; unowned jobs after setup are isolated."""
+        if owner_id is not None:
+            return owner_id
+        return "__system__" if self.user_count() > 0 else None
 
     # ---------- todos ----------
     def add_todo(self, task_id: str, title: str) -> dict[str, Any]:
@@ -935,12 +1338,14 @@ class Store:
         with self._conn() as conn:
             conn.execute(
                 "INSERT INTO automations "
-                "(id, name, cron, goal, enabled, recurring, jitter_ratio, next_run_at, last_run_at, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?) "
+                "(id, name, cron, goal, enabled, recurring, jitter_ratio, next_run_at, last_run_at, created_at, "
+                "owner_id, retry_count, retrying, run_count) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(id) DO UPDATE SET "
                 "name=excluded.name, cron=excluded.cron, goal=excluded.goal, "
                 "enabled=excluded.enabled, recurring=excluded.recurring, "
-                "jitter_ratio=excluded.jitter_ratio, next_run_at=excluded.next_run_at",
+                "jitter_ratio=excluded.jitter_ratio, next_run_at=excluded.next_run_at, "
+                "retry_count=excluded.retry_count, retrying=excluded.retrying, run_count=excluded.run_count",
                 (
                     item["id"], item.get("name", ""), item["cron"], item.get("goal", ""),
                     1 if item.get("enabled", True) else 0,
@@ -949,15 +1354,22 @@ class Store:
                     item.get("next_run_at"),
                     item.get("last_run_at"),
                     float(item.get("created_at", time.time())),
+                    item.get("owner_id"),
+                    int(item.get("retry_count", 0)),
+                    1 if item.get("retrying") else 0,
+                    int(item.get("run_count", 0)),
                 ),
             )
         return item
 
-    def list_automations(self) -> list[dict[str, Any]]:
+    def list_automations(self, owner_id: str | None = None) -> list[dict[str, Any]]:
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM automations ORDER BY created_at"
-            ).fetchall()
+            if owner_id is None:
+                rows = conn.execute("SELECT * FROM automations ORDER BY created_at").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM automations WHERE owner_id=? ORDER BY created_at", (owner_id,)
+                ).fetchall()
         items = []
         for row in rows:
             item = dict(row)
@@ -966,22 +1378,36 @@ class Store:
             items.append(item)
         return items
 
-    def delete_automation(self, item_id: str) -> bool:
+    def delete_automation(self, item_id: str, owner_id: str | None = None) -> bool:
         with self._conn() as conn:
-            cur = conn.execute("DELETE FROM automations WHERE id=?", (item_id,))
+            if owner_id is None:
+                cur = conn.execute("DELETE FROM automations WHERE id=?", (item_id,))
+            else:
+                cur = conn.execute("DELETE FROM automations WHERE id=? AND owner_id=?", (item_id, owner_id))
         return cur.rowcount > 0
 
-    def mark_automation_run(self, item_id: str, next_run_at: float | None) -> None:
+    def mark_automation_run(
+        self, item_id: str, next_run_at: float | None, retry_count: int = 0,
+        retrying: bool = False, run_count: int | None = None,
+    ) -> None:
         """记一次执行，并写上下次触发时间。"""
         with self._conn() as conn:
-            conn.execute(
-                "UPDATE automations SET last_run_at=?, next_run_at=? WHERE id=?",
-                (time.time(), next_run_at, item_id),
-            )
+            if run_count is None:
+                conn.execute(
+                    "UPDATE automations SET last_run_at=?, next_run_at=?, retry_count=?, retrying=? WHERE id=?",
+                    (time.time(), next_run_at, retry_count, int(retrying), item_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE automations SET last_run_at=?, next_run_at=?, retry_count=?, retrying=?, run_count=? WHERE id=?",
+                    (time.time(), next_run_at, retry_count, int(retrying), run_count, item_id),
+                )
 
     # ---------- 定时任务的执行记录 ----------
     def start_automation_run(
-        self, run_id: str, automation_id: str, name: str, goal: str, started_at: float
+        self, run_id: str, automation_id: str, name: str, goal: str, started_at: float,
+        owner_id: str | None = None, attempt: int = 1, parent_run_id: str | None = None,
+        manual_retry: bool = False,
     ) -> None:
         """记一次定时任务的执行开始。
 
@@ -991,9 +1417,9 @@ class Store:
         with self._conn() as conn:
             conn.execute(
                 "INSERT INTO automation_runs"
-                "(id, automation_id, name, goal, status, started_at, ended_at) "
-                "VALUES(?,?,?,?,'running',?,?)",
-                (run_id, automation_id, name, goal, started_at, started_at),
+                "(id, automation_id, name, goal, status, started_at, ended_at, owner_id, attempt, parent_run_id, manual_retry) "
+                "VALUES(?,?,?,?,'running',?,?,?,?,?,?)",
+                (run_id, automation_id, name, goal, started_at, started_at, owner_id, attempt, parent_run_id, int(manual_retry)),
             )
 
     def finish_automation_run(
@@ -1026,10 +1452,22 @@ class Store:
                 ),
             )
 
-    def automation_runs(self, automation_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    def automation_runs(
+        self, automation_id: str = "", limit: int = 50, owner_id: str | None = None
+    ) -> list[dict[str, Any]]:
         """执行记录列表。没给 automation_id 就按时间倒序给全部。"""
         with self._conn() as conn:
-            if automation_id:
+            if owner_id is not None and automation_id:
+                rows = conn.execute(
+                    "SELECT * FROM automation_runs WHERE automation_id=? AND owner_id=? "
+                    "ORDER BY started_at DESC LIMIT ?", (automation_id, owner_id, limit)
+                ).fetchall()
+            elif owner_id is not None:
+                rows = conn.execute(
+                    "SELECT * FROM automation_runs WHERE owner_id=? ORDER BY started_at DESC LIMIT ?",
+                    (owner_id, limit),
+                ).fetchall()
+            elif automation_id:
                 rows = conn.execute(
                     "SELECT * FROM automation_runs WHERE automation_id=? "
                     "ORDER BY started_at DESC LIMIT ?",
@@ -1042,23 +1480,28 @@ class Store:
                 ).fetchall()
         return [dict(r) for r in rows]
 
-    def automation_run_detail(self, run_id: str) -> dict[str, Any] | None:
+    def automation_run_detail(self, run_id: str, owner_id: str | None = None) -> dict[str, Any] | None:
         with self._conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM automation_runs WHERE id=?", (run_id,)
-            ).fetchone()
+            if owner_id is None:
+                row = conn.execute("SELECT * FROM automation_runs WHERE id=?", (run_id,)).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM automation_runs WHERE id=? AND owner_id=?", (run_id, owner_id)
+                ).fetchone()
         return dict(row) if row else None
 
     # ---------- 团队 ----------
     def save_team(self, team: dict[str, Any]) -> None:
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO teams (id, name, goal, members, created_at) VALUES (?,?,?,?,?) "
-                "ON CONFLICT(name) DO UPDATE SET goal=excluded.goal, members=excluded.members",
+                "INSERT INTO teams (id, name, goal, members, created_at, owner_id) VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET name=excluded.name, goal=excluded.goal, "
+                "members=excluded.members, owner_id=excluded.owner_id",
                 (
                     team["id"], team["name"], team.get("goal", ""),
                     json.dumps(team.get("members") or {}, ensure_ascii=False),
                     float(team.get("created_at", time.time())),
+                    team.get("owner_id"),
                 ),
             )
 
@@ -1081,15 +1524,20 @@ class Store:
                 return team
         return None
 
-    def delete_team(self, name: str) -> bool:
+    def delete_team(self, name: str, owner_id: str | None = None) -> bool:
         with self._conn() as conn:
-            # 先把 id 查出来再删 —— 原来先删 teams 行再去子查询找 id，
-            # 行已经没了，子查询查不到，信箱消息全成孤儿。
-            row = conn.execute("SELECT id FROM teams WHERE name=?", (name,)).fetchone()
+            row = conn.execute(
+                "SELECT id FROM teams WHERE name=? AND owner_id IS ?", (name, owner_id)
+            ).fetchone()
             if row is None:
                 return False
-            conn.execute("DELETE FROM team_messages WHERE team_id=?", (row["id"],))
-            cur = conn.execute("DELETE FROM teams WHERE name=?", (name,))
+            # 删除定义时只清理创建者自己的信箱；其他账号的私有消息保留。
+            conn.execute(
+                "DELETE FROM team_messages WHERE team_id=? AND owner_id IS ?", (row["id"], owner_id)
+            )
+            cur = conn.execute(
+                "DELETE FROM teams WHERE name=? AND owner_id IS ?", (name, owner_id)
+            )
         return cur.rowcount > 0
 
     def rename_team(self, old_name: str, new_name: str) -> bool:
@@ -1106,22 +1554,35 @@ class Store:
     def save_team_message(self, message: dict[str, Any]) -> None:
         with self._conn() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO team_messages (id, team_id, sender, recipient, content, read, ts) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO team_messages (id, team_id, sender, recipient, content, read, ts, owner_id) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 (
                     message["id"], message["team_id"], message["sender"], message["recipient"],
                     message["content"], 1 if message.get("read") else 0, float(message["ts"]),
+                    message.get("owner_id"),
                 ),
             )
 
-    def team_messages(self, team_id: str, recipient: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    def team_messages(
+        self, team_id: str, recipient: str = "", limit: int = 50, owner_id: str | None = None
+    ) -> list[dict[str, Any]]:
         """取信箱消息，**最新的在前**。
 
         ts 相同时按 rowid 兜底 —— 同一秒写入的多条消息光靠 ts 排会错位
         （跟对话消息用 rowid 排序是同一个坑）。
         """
         with self._conn() as conn:
-            if recipient:
+            if owner_id is not None and recipient:
+                rows = conn.execute(
+                    "SELECT * FROM team_messages WHERE team_id=? AND recipient=? AND owner_id=? "
+                    "ORDER BY ts DESC, rowid DESC LIMIT ?", (team_id, recipient, owner_id, limit)
+                ).fetchall()
+            elif owner_id is not None:
+                rows = conn.execute(
+                    "SELECT * FROM team_messages WHERE team_id=? AND owner_id=? "
+                    "ORDER BY ts DESC, rowid DESC LIMIT ?", (team_id, owner_id, limit)
+                ).fetchall()
+            elif recipient:
                 rows = conn.execute(
                     "SELECT * FROM team_messages WHERE team_id=? AND recipient=? "
                     "ORDER BY ts DESC, rowid DESC LIMIT ?",
@@ -1135,12 +1596,48 @@ class Store:
                 ).fetchall()
         return [dict(r) for r in rows]
 
-    def mark_team_messages_read(self, team_id: str, recipient: str) -> int:
-        with self._lock, self._conn() as conn:
-            cur = conn.execute(
-                "UPDATE team_messages SET read=1 WHERE team_id=? AND recipient=? AND read=0",
-                (team_id, recipient),
+    def team_message_owners(self, team_id: str) -> list[str | None]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT owner_id FROM team_messages WHERE team_id=?", (team_id,)
+            ).fetchall()
+        return [row["owner_id"] for row in rows]
+
+    def team_messages_for_owner(
+        self, team_id: str, owner_id: str | None, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM team_messages WHERE team_id=? AND owner_id IS ? "
+                "ORDER BY ts DESC, rowid DESC LIMIT ?", (team_id, owner_id, limit)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def prune_team_messages(
+        self, team_id: str, owner_id: str | None, limit: int = 200
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM team_messages WHERE rowid IN ("
+                "SELECT rowid FROM team_messages WHERE team_id=? AND owner_id IS ? "
+                "ORDER BY ts DESC, rowid DESC LIMIT -1 OFFSET ?)"
+                , (team_id, owner_id, limit)
             )
+
+    def mark_team_messages_read(
+        self, team_id: str, recipient: str, owner_id: str | None = None
+    ) -> int:
+        with self._lock, self._conn() as conn:
+            if owner_id is None:
+                cur = conn.execute(
+                    "UPDATE team_messages SET read=1 WHERE team_id=? AND recipient=? AND read=0",
+                    (team_id, recipient),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE team_messages SET read=1 WHERE team_id=? AND recipient=? AND owner_id=? AND read=0",
+                    (team_id, recipient, owner_id),
+                )
         return cur.rowcount
 
     # ---------- 检查点 ----------

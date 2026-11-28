@@ -26,6 +26,27 @@ class InstallRequest(BaseModel):
     kinds: list[str] | None = None
 
 
+class LaunchAppRequest(BaseModel):
+    """启动应用 —— **只接受 id**，不接受任意路径。
+
+    以前是裸 dict：body 传数组 / 字符串时 `req.get` 直接 AttributeError → 500。
+    """
+    id: str = ""
+
+
+class CustomAppRequest(BaseModel):
+    """新增 / 更新一个自定义应用。
+
+    PUT 时路径上的 `app_id` 会覆盖 body 里的 `id`（保持既有行为）。
+    业务层仍负责「名字不能为空 / 目标必须存在」等中文 400。
+    """
+    id: str | None = None
+    name: str = ""
+    target: str = ""
+    note: str = ""
+    created_at: float | None = None
+
+
 # 仓库根 —— `oryx/domains/app.py` 往上三层
 # （`oryx/server.py` 原本是两层：server.py → oryx → 仓库根）
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -104,7 +125,7 @@ def app_icons_payload() -> dict:
     return {"icons": payload, "count": len(payload)}
 
 
-def launch_app(req: dict) -> dict:
+def launch_app(req: LaunchAppRequest) -> dict:
     """启动一个已登记的应用。
 
     **只接受 id**，不接受任意路径 —— 接受路径的话这个端点就是
@@ -112,7 +133,7 @@ def launch_app(req: dict) -> dict:
     """
     from .. import manage
 
-    app_id = str(req.get("id") or "").strip()
+    app_id = req.id.strip()
     if not app_id:
         raise HTTPException(400, "id 不能为空")
     try:
@@ -128,20 +149,21 @@ def custom_apps_list() -> dict:
     return {"apps": manage.load_custom_apps()}
 
 
-def custom_app_create(req: dict) -> dict:
+def custom_app_create(req: CustomAppRequest) -> dict:
     from .. import manage
 
     try:
-        item = manage.save_custom_app(req)
+        item = manage.save_custom_app(req.model_dump(exclude_unset=True))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
     return {"ok": True, "app": item}
 
 
-def custom_app_update(app_id: str, req: dict) -> dict:
+def custom_app_update(app_id: str, req: CustomAppRequest) -> dict:
     from .. import manage
 
-    payload = {**req, "id": app_id}
+    # 路径 id 是权威值：不让 body 里的 id 把资源改到别处去
+    payload = {**req.model_dump(exclude_unset=True), "id": app_id}
     try:
         item = manage.save_custom_app(payload)
     except ValueError as exc:
@@ -175,7 +197,7 @@ def register(app, agent) -> None:
         return json(app_icons_payload())
 
     @router.post("/apps/launch")
-    async def _launch(req: dict):
+    async def _launch(req: LaunchAppRequest):
         return json(launch_app(req))
 
     @router.get("/apps/custom")
@@ -183,11 +205,11 @@ def register(app, agent) -> None:
         return json(custom_apps_list())
 
     @router.post("/apps/custom")
-    async def _custom_create(req: dict):
+    async def _custom_create(req: CustomAppRequest):
         return json(custom_app_create(req))
 
     @router.put("/apps/custom/{app_id}")
-    async def _custom_update(app_id: str, req: dict):
+    async def _custom_update(app_id: str, req: CustomAppRequest):
         return json(custom_app_update(app_id, req))
 
     @router.delete("/apps/custom/{app_id}")

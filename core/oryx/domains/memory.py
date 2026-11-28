@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
 from ..store import Store
@@ -21,7 +21,7 @@ class MemoryRequest(BaseModel):
 
     **为什么要有这个契约层**
     ----------------------
-    以前这里是 `req: dict` + `str(req.get("text", ""))`。
+    以前这里是裸 dict 请求体 + `str(req.get("text", ""))`。
     前端表单没填时传 `{"text": null}`，而 `str(None)` 得到的是字符串
     `"None"` —— **真的被写进了库里**。实测：
 
@@ -53,21 +53,23 @@ class MemoryRequest(BaseModel):
         return "" if value is None else value
 
 
-def list_memories(store: Store, limit: int = 50) -> dict:
-    return {"memories": store.search_memories("", limit)}
+def list_memories(store: Store, limit: int = 50, owner_id: str | None = None) -> dict:
+    return {"memories": store.search_memories("", limit, owner_id)}
 
 
-def add_memory(store: Store, text: str, tags: str = "") -> dict:
+def add_memory(store: Store, text: str, tags: str = "",
+               owner_id: str | None = None) -> dict:
     text = (text or "").strip()
     if not text:
         raise HTTPException(400, "text 不能为空")
     # 返回值原样透出 —— `save_memory` 给的是 {"id": ..., "text": ...}，
     # 前端拿 id 去显示「刚记住的那条」。换掉会让前端拿不到 id。
-    return store.save_memory(text, (tags or "").strip())
+    return store.save_memory(text, (tags or "").strip(), owner_id)
 
 
-def delete_memory(store: Store, memory_id: str) -> dict:
-    if not store.forget_memory(memory_id):
+def delete_memory(store: Store, memory_id: str,
+                  owner_id: str | None = None) -> dict:
+    if not store.forget_memory(memory_id, owner_id):
         raise HTTPException(404, "没有这条记忆")
     return {"deleted": memory_id}
 
@@ -76,15 +78,19 @@ def register(app, store: Store) -> None:
     """把本域路由挂到 app。依赖用闭包注入，action 本身保持纯函数。"""
 
     @router.get("")
-    async def _list(limit: int = 50):
-        return json(list_memories(store, limit))
+    async def _list(request: Request, limit: int = 50):
+        return json(list_memories(store, limit, getattr(request.state, "user_id", None)))
 
     @router.post("")
-    async def _add(req: MemoryRequest):
-        return json(add_memory(store, req.text, req.tags))
+    async def _add(req: MemoryRequest, request: Request):
+        return json(add_memory(
+            store, req.text, req.tags, getattr(request.state, "user_id", None)
+        ))
 
     @router.delete("/{memory_id}")
-    async def _delete(memory_id: str):
-        return json(delete_memory(store, memory_id))
+    async def _delete(memory_id: str, request: Request):
+        return json(delete_memory(
+            store, memory_id, getattr(request.state, "user_id", None)
+        ))
 
     app.include_router(router)

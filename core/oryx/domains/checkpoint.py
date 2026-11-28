@@ -15,25 +15,35 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from ..agentlink import AgentLink
 from ..ipc import IpcError
-from ._common import is_kernel_unready
+from ._common import map_ipc_error
 
 router = APIRouter(prefix="/api/checkpoints", tags=["检查点"])
 
 SCOPES = ("Code", "Conversation", "CodeAndConversation")
 
 
+class RewindRequest(BaseModel):
+    """回退范围。以前是裸 dict 请求体，传个数组 / 字符串会 500。"""
+    scope: str = "CodeAndConversation"
+
+
 # ---------- actions ----------
-def list_checkpoints(agent: AgentLink, task_id: str) -> dict:
+def list_checkpoints(agent: AgentLink, task_id: str, store=None,
+                     owner_id: str | None = None) -> dict:
     if not task_id:
         return {"task_id": "", "current": None, "checkpoints": []}
+    if store is not None and store.get_task(task_id, owner_id) is None:
+        raise HTTPException(404, "没有这个会话")
     return _call(agent, "checkpoint.list", task_id=task_id)
 
 
-def rewind_checkpoint(agent: AgentLink, checkpoint_id: str, scope: str) -> dict:
+def rewind_checkpoint(agent: AgentLink, checkpoint_id: str, scope: str, store=None,
+                      owner_id: str | None = None) -> dict:
     """退到某个检查点。
 
     内核用 ok=false 表达"退不了"（检查点不存在、scope 不合法），
@@ -41,6 +51,10 @@ def rewind_checkpoint(agent: AgentLink, checkpoint_id: str, scope: str) -> dict:
     """
     if not checkpoint_id:
         raise HTTPException(400, "checkpoint 不能为空")
+    if store is not None:
+        task_id = store.checkpoint_task_id(checkpoint_id)
+        if not task_id or store.get_task(task_id, owner_id) is None:
+            raise HTTPException(404, "没有这个检查点")
     if scope not in SCOPES:
         raise HTTPException(400, f"scope 只能是 {' / '.join(SCOPES)}")
     result = _call(agent, "checkpoint.rewind", checkpoint=checkpoint_id, scope=scope)
@@ -60,26 +74,25 @@ def _call(agent: AgentLink, method: str, **params):
 
 
 def _map(exc: IpcError) -> HTTPException:
-    text = str(exc)
-    # 「内核未就绪」是 503（服务端依赖没就绪），规则与 _common 一致。
-    if is_kernel_unready(text):
-        return HTTPException(503, text)
-    if "没有这个检查点" in text:
-        return HTTPException(404, text)
-    return HTTPException(400, text)
+    """状态码规则统一走 `_common.map_ipc_error`，本域不再自己维护一份。"""
+    return map_ipc_error(exc)
 
 
 # ---------- routes ----------
-def register(app, agent: AgentLink) -> None:
+def register(app, agent: AgentLink, store=None) -> None:
     from fastapi.responses import JSONResponse
 
     @router.get("/{task_id}")
-    async def _list(task_id: str):
-        return JSONResponse(list_checkpoints(agent, task_id))
+    async def _list(task_id: str, request: Request):
+        return JSONResponse(list_checkpoints(
+            agent, task_id, store, getattr(request.state, "user_id", None)
+        ))
 
     @router.post("/{checkpoint_id}/rewind")
-    async def _rewind(checkpoint_id: str, req: dict):
-        scope = str((req or {}).get("scope") or "CodeAndConversation")
-        return JSONResponse(rewind_checkpoint(agent, checkpoint_id, scope))
+    async def _rewind(checkpoint_id: str, req: RewindRequest, request: Request):
+        scope = req.scope or "CodeAndConversation"
+        return JSONResponse(rewind_checkpoint(
+            agent, checkpoint_id, scope, store, getattr(request.state, "user_id", None)
+        ))
 
     app.include_router(router)

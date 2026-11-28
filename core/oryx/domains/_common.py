@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import HTTPException
 
 from ..ipc import IpcError
@@ -26,37 +28,54 @@ def is_kernel_unready(text: str) -> bool:
     return "内核未就绪" in text
 
 
-def rpc_failure(exc: IpcError) -> HTTPException:
-    """把 IPC 错误映射成合适的 HTTP 状态码。
+# IPC 错误 → HTTP 状态码的判据，全项目**只在这一处**维护。
+#
+# 以前 `_common` / workflow / checkpoint / schedule 各写一份 `_map`，
+# 同一句内核报错在不同域会得到不同状态码（「只有创建者」在 A 域 403、
+# 在 B 域 400；「内核未就绪」在 C 域 400）。现在各域都委托给这里，
+# 域特有的提示词通过参数追加，不再复制整段 if 链。
+_FORBIDDEN_HINTS = ("只有创建者",)
+_CONFLICT_HINTS = ("已有扫描", "扫描进行中", "已释放")
+_NOT_FOUND_HINTS = ("没有这个", "不在", "已被")
 
-    内核侧抛的是 ValueError（参数/业务不对）和 RuntimeError（状态冲突），
-    到这里要还原成 400 / 409 / 404，不然前端只能看到笼统的 500。
 
-    **「内核未就绪」是 503，不是 400** —— 见下面那段。
+def map_ipc_error(
+    exc: IpcError | str,
+    *,
+    not_found: tuple[str, ...] = (),
+    conflict: tuple[str, ...] = (),
+    forbidden: tuple[str, ...] = (),
+) -> HTTPException:
+    """IPC 错误 → HTTP 状态码（全项目唯一一套规则）。
+
+    优先级：403 越权 > 503 依赖未就绪 > 409 状态冲突 >
+    404 资源不存在 > 400 参数 / 业务不对。
+
+    「内核未就绪」必须是 503：请求本身完全正确，只是内核还在启动，
+    报 400 等于说「你写错了」，前端会把它当成用户的错来提示。
     """
-
-    # 为什么 400 是错的
-    # ----------------
-    # 内核没就绪是**服务端依赖**的问题，不是请求的问题：
-    # 用户的请求完全正确，只是 Agent 内核还在启动（或崩了正在重启）。
-    # 报 400 等于告诉前端「你请求写错了」——
-    # 前端于是把它当成用户的错来提示，实际上一行提示都不该弹。
-    #
-    # 503 Service Unavailable 的语义正是「现在不行，等会儿再来」。
-    #
-    # 实测后果：内核没起来时首屏会连打 4 个 400
-    # （/api/teams、/api/workflows 三条），控制台一片红。
     text = str(exc)
+    if any(h in text for h in (*_FORBIDDEN_HINTS, *forbidden)):
+        return HTTPException(403, text)
     if is_kernel_unready(text):
         return HTTPException(503, text)
-    if "已有扫描" in text or "扫描进行中" in text or "已释放" in text:
+    if any(h in text for h in (*_CONFLICT_HINTS, *conflict)):
         return HTTPException(409, text)
-    if "没有这个" in text or "不在" in text or "已被" in text:
+    if any(h in text for h in (*_NOT_FOUND_HINTS, *not_found)):
         return HTTPException(404, text)
     return HTTPException(400, text)
 
 
-def json(payload: dict):
+def rpc_failure(exc: IpcError) -> HTTPException:
+    """把 IPC 错误映射成合适的 HTTP 状态码（各域统一入口）。
+
+    内核侧抛的是 ValueError（参数 / 业务不对）和 RuntimeError（状态冲突），
+    到这里要还原成 400 / 409 / 404，不然前端只能看到笼统的 500。
+    """
+    return map_ipc_error(exc)
+
+
+def json(payload: dict[str, Any]):
     """统一用 JSONResponse 返回 —— 各域别各写各的。"""
     from fastapi.responses import JSONResponse
 

@@ -200,3 +200,45 @@ def allowed_tools(mode: str | None) -> frozenset[str] | None:
 def mode_cycle() -> list[str]:
     """Shift+Tab 循环顺序。dontAsk 不在里面 —— 它需要显式设置。"""
     return ["ask", "craft", "bypass", "auto", "plan", "delegate"]
+
+
+# 设置页的展示顺序：只读 / 安全的排前面，跳过确认与无人值守排后面。
+# 跟 mode_cycle()（Shift+Tab 轮换顺序）故意不同 —— 一个是「怎么快速切」，
+# 一个是「第一次看见时怎么读懂」。
+_CATALOG_ORDER = (
+    "ask", "plan", "craft", "auto", "delegate", "bypass", "dontAsk",
+)
+
+# 给界面用的一句话说明。**不要**把 ModePolicy.prompt 发出去：那是系统提示词，
+# 又长又是内部行为约定，前端既不需要也不该整段展示。
+_MODE_HINTS: dict[str, str] = {
+    "ask": "只使用只读工具查证，任何写入、删除、执行命令都会被拦下。",
+    "plan": "先调研再产出可执行方案，问过你之后才动手，自己不执行。",
+    "craft": "全部工具可用，把事情做完；破坏性操作仍会弹确认卡。",
+    "bypass": "跳过确认直接执行，仍受禁止规则约束，适合开发者本机调试。",
+    "dontAsk": "没有人能点确认：需要确认的操作一律拒绝，适合无人值守。",
+    "auto": "由分类器判断是否需要确认；判不准时照旧弹卡，不会替你猜。",
+    "delegate": "主 Agent 只做拆解与协调，动手交给子 Agent / 团队成员。",
+}
+
+
+def catalog() -> list[dict[str, object]]:
+    """交互模式目录 —— 给设置页 / 新建运行页渲染选项。
+
+    前端不硬编码模式清单：以后后端加一种模式，界面自动多一项。
+    标签取自 InteractionMode.label，能力标记取自 ModePolicy，
+    两边不会各写一份然后慢慢漂移。
+    """
+    out: list[dict[str, object]] = []
+    for name in _CATALOG_ORDER:
+        policy = MODE_POLICIES[name]
+        out.append({
+            "name": name,
+            "label": InteractionMode(name).label,
+            "hint": _MODE_HINTS[name],
+            "read_only": not policy.allow_write,
+            "skip_approval": policy.skip_approval,
+            "unattended": policy.deny_on_ask,
+            "coordination_only": policy.coordination_only,
+        })
+    return out

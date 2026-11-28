@@ -13,17 +13,26 @@ from ..tools import ToolSpec, build_registry, tool_result_text
 class MemoryToolsMixin:
     def _register_memory_tools(self) -> None:
         def _save(text: str, tags: str = "") -> dict[str, Any]:
-            saved = self.store.save_memory(text, tags)
-            self.bus.publish("memory.updated", memory=saved)
+            owner_id = getattr(self, "_active_owner_id", None)
+            saved = self.store.save_memory(text, tags, owner_id)
+            self.bus.publish("memory.updated", memory=saved, _owner_id=owner_id)
             return {"ok": True, "content": saved}
 
         def _search(query: str = "", limit: int = 20) -> dict[str, Any]:
-            return {"ok": True, "content": self.store.search_memories(query, int(limit))}
+            owner_id = getattr(self, "_active_owner_id", None)
+            return {
+                "ok": True,
+                "content": self.store.search_memories(query, int(limit), owner_id),
+            }
 
         def _forget(id: str) -> dict[str, Any]:
-            removed = self.store.forget_memory(id)
+            owner_id = getattr(self, "_active_owner_id", None)
+            removed = self.store.forget_memory(id, owner_id)
             if removed:
-                self.bus.publish("memory.updated", memory={"id": id, "forgotten": True})
+                self.bus.publish(
+                    "memory.updated", memory={"id": id, "forgotten": True},
+                    _owner_id=owner_id,
+                )
             return {"ok": removed, "content": "已删除" if removed else f"没有这条记忆：{id}"}
 
         self.registry["memory_save"] = ToolSpec(

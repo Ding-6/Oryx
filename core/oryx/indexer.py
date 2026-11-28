@@ -171,7 +171,7 @@ def _clean(text: str) -> str:
     return text.strip()
 
 
-def extract_text(path: Path, ocr: bool = True) -> tuple[str, str]:
+def extract_text(path: Path, ocr: bool = True, *, unlimited: bool = False) -> tuple[str, str]:
     """返回 (正文, 说明)。说明用于记录跳过的原因。"""
     ext = path.suffix.lower()
     try:
@@ -188,11 +188,11 @@ def extract_text(path: Path, ocr: bool = True) -> tuple[str, str]:
         if ext in TEXT_EXT:
             return _clean(_decode(path.read_bytes())), ""
         if ext == ".pdf":
-            return _extract_pdf(path), ""
+            return _extract_pdf(path, max_pages=None if unlimited else MAX_PAGES), ""
         if ext == ".docx":
             return _extract_docx(path), ""
         if ext == ".xlsx":
-            return _extract_xlsx(path), ""
+            return _extract_xlsx(path, max_rows=None if unlimited else MAX_ROWS), ""
         if ext == ".pptx":
             return _extract_pptx(path), ""
     except Exception as exc:
@@ -200,7 +200,7 @@ def extract_text(path: Path, ocr: bool = True) -> tuple[str, str]:
     return "", "不支持的文件类型"
 
 
-def _extract_pdf(path: Path) -> str:
+def _extract_pdf(path: Path, max_pages: int | None = MAX_PAGES) -> str:
     try:
         from pypdf import PdfReader
     except ImportError:
@@ -208,7 +208,9 @@ def _extract_pdf(path: Path) -> str:
 
     reader = PdfReader(str(path))
     parts: list[str] = []
-    for page in reader.pages[:MAX_PAGES]:
+    for index, page in enumerate(reader.pages):
+        if max_pages is not None and index >= max_pages:
+            break
         try:
             parts.append(page.extract_text() or "")
         except Exception:
@@ -233,7 +235,7 @@ def _extract_docx(path: Path) -> str:
         return _clean(re.sub(r"<[^>]+>", " ", xml))
 
 
-def _extract_xlsx(path: Path) -> str:
+def _extract_xlsx(path: Path, max_rows: int | None = MAX_ROWS) -> str:
     try:
         import openpyxl  # type: ignore
 
@@ -247,9 +249,9 @@ def _extract_xlsx(path: Path) -> str:
                 if cells:
                     parts.append(" | ".join(cells))
                     count += 1
-                if count >= MAX_ROWS:
+                if max_rows is not None and count >= max_rows:
                     break
-            if count >= MAX_ROWS:
+            if max_rows is not None and count >= max_rows:
                 break
         wb.close()
         return _clean("\n".join(parts))
@@ -286,7 +288,7 @@ def _hash_piece(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
 
-def chunk_text(text: str) -> list[str]:
+def chunk_text(text: str, *, max_chunks: int | None = MAX_CHUNKS_PER_FILE) -> list[str]:
     if not text:
         return []
     chunks: list[str] = []
@@ -295,7 +297,7 @@ def chunk_text(text: str) -> list[str]:
         piece = text[start : start + CHUNK_SIZE]
         if piece.strip():
             chunks.append(piece)
-        if len(chunks) >= MAX_CHUNKS_PER_FILE:
+        if max_chunks is not None and len(chunks) >= max_chunks:
             break
     return chunks
 

@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 
 from ..api.response import ok
 from ..ipc import IpcError
@@ -145,7 +145,7 @@ async def overview_teams(agent) -> dict:
 # ── runs ────────────────────────────────────────────────────────────
 
 
-def overview_runs(store: Store, limit: int = 20) -> dict:
+def overview_runs(store: Store, limit: int = 20, owner_id: str | None = None) -> dict:
     """运行总览：最近跑了什么 + 整体有多少。
 
     ``total`` / ``active`` / ``today`` 来自库里的聚合查询，
@@ -153,8 +153,8 @@ def overview_runs(store: Store, limit: int = 20) -> dict:
     「最近 N 个里有几个」，跟「一共跑了多少」不是一回事。
     """
     limit = max(1, min(int(limit), 100))
-    sessions = store.list_sessions(limit)
-    stats = store.session_stats()
+    sessions = store.list_sessions(limit, owner_id)
+    stats = store.session_stats(owner_id)
 
     runs: list[dict[str, Any]] = []
     for item in sessions:
@@ -200,7 +200,8 @@ def _loads(raw: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def overview_suggestions(store: Store, task_id: str = "") -> dict:
+def overview_suggestions(store: Store, task_id: str = "",
+                         owner_id: str | None = None) -> dict:
     """主动建议：上一轮产出之后，下一步做什么。
 
     走的是**确定性规则**（`suggestions.suggest`），不调模型 ——
@@ -210,13 +211,15 @@ def overview_suggestions(store: Store, task_id: str = "") -> dict:
     """
     if task_id:
         session = next(
-            (s for s in store.list_sessions(200) if s.get("id") == task_id), None
+            (s for s in store.list_sessions(200, owner_id) if s.get("id") == task_id), None
         )
     else:
-        sessions = store.list_sessions(1)
+        sessions = store.list_sessions(1, owner_id)
         session = sessions[0] if sessions else None
 
     if not session:
+        if task_id:
+            raise HTTPException(404, "没有这个会话")
         return {"suggestions": [], "count": 0, "source": {}}
 
     session_id = str(session.get("id") or "")
@@ -293,11 +296,13 @@ def register(app, agent, store: Store) -> None:
         return ok(await overview_teams(agent))
 
     @router.get("/runs")
-    async def _runs(limit: int = 20):
-        return ok(overview_runs(store, limit))
+    async def _runs(request: Request, limit: int = 20):
+        return ok(overview_runs(store, limit, getattr(request.state, "user_id", None)))
 
     @router.get("/suggestions")
-    async def _suggestions(task_id: str = ""):
-        return ok(overview_suggestions(store, task_id))
+    async def _suggestions(request: Request, task_id: str = ""):
+        return ok(overview_suggestions(
+            store, task_id, getattr(request.state, "user_id", None)
+        ))
 
     app.include_router(router)
