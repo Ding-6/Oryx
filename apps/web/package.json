@@ -9,7 +9,21 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:markdown": "node scripts/check-markdown.cjs",
+    "check:steps": "node scripts/check-steps.cjs",
+    "check:preferences": "node scripts/check-preferences.cjs",
+    "check:checkpoints": "node scripts/check-checkpoints.cjs",
+    "check:providers": "node scripts/check-providers.cjs",
+    "check:sessions": "node scripts/check-sessions.cjs",
+    "check:agents": "node scripts/check-agents.cjs",
+    "check:ops": "node scripts/check-ops.cjs",
+    "check:knowledge": "node scripts/check-knowledge.cjs",
+    "check:overview": "node scripts/check-overview.cjs",
+    "check:system": "node scripts/check-system.cjs",
+    "check:settings": "node scripts/check-settings.cjs",
+    "check:api": "node scripts/check-api.cjs",
+    "check:account": "node scripts/check-account.cjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
