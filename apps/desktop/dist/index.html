@@ -115,11 +115,20 @@
 
   async function poll() {
     try {
-      // 用公开无副作用的探活接口；带令牌的业务接口由内核自己下发页面
+      // 用公开无副作用的探活接口；带令牌的业务接口由内核自己下发页面。
+      // **必须校验 service 字段** —— 只认 res.ok 的话，任何占了 8765 的
+      // 本地服务都会被当成 Oryx 内核，窗口直接跳到人家的 JSON 页面上。
       const res = await fetch(`${BASE}/api/ping`, { cache: 'no-store' });
       if (res.ok) {
-        document.getElementById('status').textContent = '已连接，正在载入界面…';
-        window.location.replace(BASE);
+        let data = null;
+        try { data = await res.json(); } catch (_) { /* 不是 JSON */ }
+        if (data && data.service === 'oryx') {
+          document.getElementById('status').textContent = '已连接，正在载入界面…';
+          window.location.replace(BASE);
+          return;
+        }
+        // 端口通了但对面不是 Oryx：明确报错，别静默载入别的服务。
+        showFailure(`端口 ${PORT} 已被其它服务占用（不是 Oryx 内核）。请关闭占用进程，或设置 ORYX_PORT 换一个端口后重启。`);
         return;
       }
     } catch (_) { /* 内核还没起来 */ }

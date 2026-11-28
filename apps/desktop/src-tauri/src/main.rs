@@ -5,6 +5,7 @@
 //! 职责很薄：拉起 Python 内核 → 等它就绪 → 让 WebView 打开本地界面 → 退出时收尸。
 //! 所有业务都在 Python 侧，这样界面和内核可以各自独立演进。
 
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -18,14 +19,67 @@ mod winstate;
 const DEFAULT_PORT: u16 = 8765;
 const BACKEND_START_TIMEOUT: Duration = Duration::from_secs(25);
 
+/// 探活响应里的 Oryx 身份标识，与 `core/oryx/server.py` 的 `/api/ping` 一致：
+/// `{"ok":true,"service":"oryx"}`。只探 TCP 端口会把别的本地服务当成内核 ——
+/// 2026-11-26 实测 8765 被「地导目标分析」后端占用，桌面端直接跳到了
+/// 人家的 JSON 页面上。
+const PING_IDENTITY: &str = "\"service\":\"oryx\"";
+
 struct Backend(Mutex<Option<Child>>);
 
-fn port_ready(port: u16) -> bool {
+#[derive(PartialEq, Eq, Debug)]
+enum PortState {
+    /// `/api/ping` 返回 200 且带 Oryx 身份 —— 已有内核可复用。
+    Ready,
+    /// 端口能连上，但对面不是 Oryx 内核。
+    Foreign,
+    /// 端口没人监听，可以拉起内核。
+    Free,
+}
+
+/// 用标准库手写一次最小 HTTP GET `/api/ping`，校验响应身份。
+///
+/// 为什么不引 HTTP 客户端：Cargo.toml 里只有 tauri / serde，为了一次探活
+/// 加一整套依赖不值；`/api/ping` 公开、无副作用、响应体固定，
+/// `Connection: close` + 读一段文本就够了。
+fn probe_port(port: u16) -> PortState {
     let addr: SocketAddr = match format!("127.0.0.1:{port}").parse() {
         Ok(a) => a,
-        Err(_) => return false,
+        Err(_) => return PortState::Free,
     };
-    TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
+    let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(300)) {
+        Ok(s) => s,
+        Err(_) => return PortState::Free,
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(600)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(600)));
+    let req = format!(
+        "GET /api/ping HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(req.as_bytes()).is_err() {
+        return PortState::Foreign;
+    }
+    let mut buf = Vec::new();
+    // 读超时也保留已读到的内容 —— 有的服务不发 Connection: close，
+    // 但状态行和响应体已经够判断了。
+    let _ = stream.read_to_end(&mut buf);
+    let text = String::from_utf8_lossy(&buf);
+    let status_200 = text
+        .lines()
+        .next()
+        .map(|line| line.contains(" 200 "))
+        .unwrap_or(false);
+    if status_200 && text.contains(PING_IDENTITY) {
+        PortState::Ready
+    } else {
+        PortState::Foreign
+    }
+}
+
+fn port_conflict_message(port: u16) -> String {
+    format!(
+        "端口 {port} 已被其它服务占用（不是 Oryx 内核）。请关闭占用进程，或设置 ORYX_PORT 换一个端口后重启。"
+    )
 }
 
 /// 判定一个目录是不是「开发 checkout 的仓库根」——即除了 core/ 还带 apps/desktop。
@@ -140,24 +194,27 @@ fn spawn_python(core: &std::path::Path, port: u16) -> Result<Child, String> {
 
 /// 拉起内核（复用已有 / 新拉起 / 失败）。
 ///
-/// 返回 `Ok(None)` = 复用已在跑的实例；`Ok(Some(child))` = 新拉起；
+/// 返回 `Ok(None)` = 复用已在跑的实例，或端口被别的进程占着（不拉起，
+/// 由 `wait_ready_or_report` 立即给出明确原因）；`Ok(Some(child))` = 新拉起；
 /// `Err(reason)` = 拉不起来，`reason` 是给用户看的原因。
 fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Option<Child>, String> {
-    if port_ready(port) {
-        // 已经有一个内核在跑（比如用户先启动了命令行版本），直接复用
-        return Ok(None);
+    match probe_port(port) {
+        // 已经有一个 Oryx 内核在跑（比如用户先启动了命令行版本），直接复用
+        PortState::Ready => Ok(None),
+        // 端口被别人占着：再 spawn 一个也绑不上，别浪费 25 秒等超时
+        PortState::Foreign => Ok(None),
+        PortState::Free => {
+            let core = core_dir(app);
+            spawn_python(&core, port).map(Some)
+        }
     }
-    let core = core_dir(app);
-    spawn_python(&core, port).map(Some)
 }
 
 /// 等内核就绪，同时盯着子进程的死活。
 ///
-/// 返回 `Ok(true)` = 端口通了；`Err(reason)` = 没起来，`reason` 是原因。
-///
-/// 为什么不能只等端口：内核要是起来就立刻退出（依赖缺失、解释器不对），
-/// 端口永远不通 —— 光等端口的话用户要干等 25 秒才知道失败，
-/// 而且不知道失败在哪。盯住子进程的退出码能马上给出真实原因。
+/// `Ok(())` = Oryx 内核真的就绪；`Err(reason)` = 没起来 / 端口被占。
+/// 探活必须验身份：只探 TCP 的话，任何占了端口的本地服务都会被当成内核
+/// （2026-11-26 实测被「地导目标分析」后端占用，桌面端跳到了对方的页面）。
 fn wait_ready_or_report(
     handle: &tauri::AppHandle,
     port: u16,
@@ -165,8 +222,11 @@ fn wait_ready_or_report(
 ) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     loop {
-        if port_ready(port) {
-            return Ok(());
+        match probe_port(port) {
+            PortState::Ready => return Ok(()),
+            // 明确报错，不干等 25 秒超时
+            PortState::Foreign => return Err(port_conflict_message(port)),
+            PortState::Free => {}
         }
         // 内核自己退了？把退出码带出去 —— 这比「超时」有用得多。
         if let Some(state) = handle.try_state::<Backend>() {
@@ -210,11 +270,15 @@ fn main() {
 
     // 抢先拉起内核：与 Tauri/WebView2 初始化并行，省掉串行等待。
     // 解析不到内核目录时留 None，交给 setup 里的完整逻辑兜底。
-    let early: Mutex<Option<Child>> = Mutex::new(if port_ready(port) {
-        None
-    } else {
-        core_dir_early().and_then(|core| spawn_python(&core, port).ok())
-    });
+    // 只有端口完全没人监听时才抢先拉起内核。端口被别的服务占着时
+    // 不要盲目 spawn（绑不上），交给 setup 里的探活给出明确原因。
+    let early: Mutex<Option<Child>> = Mutex::new(
+        if probe_port(port) == PortState::Free {
+            core_dir_early().and_then(|core| spawn_python(&core, port).ok())
+        } else {
+            None
+        },
+    );
 
     let mut builder = tauri::Builder::default();
     builder = builder.plugin(tauri_plugin_dialog::init());

@@ -151,7 +151,7 @@ def run(cmd: list[str], cwd: Path, label: str) -> int:
     env = dict(os.environ)
     # 缓存一律指到 D 盘 —— npm/cargo/pip 默认都往 C 盘写，
     # 一次构建就能在 C 盘堆出几百 MB。用户要求所有内容放 D 盘。
-    _d_env.apply(env)
+    d_env.apply(env)
     cargo = _cargo()
     if cargo:
         env["PATH"] = str(Path(cargo).parent) + os.pathsep + env.get("PATH", "")

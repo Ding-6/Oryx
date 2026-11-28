@@ -61,9 +61,17 @@ def _files(root: Path) -> list[Path]:
 
 
 def diff(src: Path, dst: Path) -> list[str]:
-    """目标缺哪些文件、哪些内容不同。"""
+    """目标相对源：缺哪些、哪些内容不同、**多出哪些**。
+
+    早先只查前两种 —— 源码里删掉的旧构建产物会永远留在打包副本里，
+    而且 `--check` 还会误报「全部与源码一致」。2026-11-26 抓到一次：
+    源码 `core/web/newui/assets` 清成 3 个文件后，副本里仍躺着 67 个
+    历史 js/css/map，检查却是绿的。加上「多」这一项后，下面的增量同步
+    才会走进删除分支（`set(dst_map) - set(src_map)` 本来就写好了）。
+    """
     problems: list[str] = []
-    for f in _files(src):
+    src_files = _files(src)
+    for f in src_files:
         rel = f.relative_to(src)
         target = dst / rel
         if not target.exists():
@@ -74,6 +82,11 @@ def diff(src: Path, dst: Path) -> list[str]:
                 problems.append(f"旧 {rel.as_posix()}")
         except OSError:
             problems.append(f"比不了 {rel.as_posix()}")
+    src_rels = {f.relative_to(src) for f in src_files}
+    for f in _files(dst):
+        rel = f.relative_to(dst)
+        if rel not in src_rels:
+            problems.append(f"多 {rel.as_posix()}")
     return problems
 
 
